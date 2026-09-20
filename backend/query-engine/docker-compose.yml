@@ -1,0 +1,15 @@
+services:
+  query-engine:
+    build: .
+    image: cs2042/query-engine:0.1.0
+    container_name: cs2042-query-engine
+    ports:
+      - "8001:8001"
+    environment:
+      QE_STORAGE_BACKEND: memory
+      QE_CATALOG_PATH: /data/catalog.json
+    volumes:
+      - query-engine-data:/data
+
+volumes:
+  query-engine-data:
