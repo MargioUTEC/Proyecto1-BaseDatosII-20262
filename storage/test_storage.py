@@ -1,6 +1,6 @@
 import os
 import struct
-from disk_manager import DiskManager
+from disk_management import DiskManager
 from page import Page
 
 DB_TEST_FILE = "test_customers.bin"
@@ -23,7 +23,7 @@ page = Page(page_id=page_id)
 record_format = "<i20s"
 
 rec1 = struct.pack(record_format, 101, b"Margiory Alvarado")
-rec2 = struct.pack(record_format, 102, b"Diana Ñañez")
+rec2 = struct.pack(record_format, 102, b"Diana Nanez")
 
 # 4. Insertar registros en la página y obtener su RID
 slot0 = page.insert_record(rec1)
