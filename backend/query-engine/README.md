@@ -17,21 +17,29 @@ cd backend/query-engine
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
 
-pytest                                              # 92 tests
+pytest                                              # 165 pruebas
 uvicorn queryengine.api.app:app --reload --port 8001
 ```
 
-Con Docker:
+Con Docker, desde la raíz del repositorio (levanta también el servicio de
+almacenamiento físico):
 
 ```bash
-docker compose up --build        # queda en http://localhost:8001
+docker compose up --build        # storage en :8000, motor en :8001
 ```
 
-Comprobación en una línea:
+Cliente de línea de comandos:
 
 ```bash
-curl -s -XPOST localhost:8001/api/query -H 'Content-Type: application/json' \
-  -d '{"sql":"CREATE TABLE t (id INT PRIMARY KEY, nombre CHAR(30)) USING HEAP"}'
+python -m queryengine                               # shell interactivo
+python -m queryengine -c "SELECT * FROM t LIMIT 5;" # una sentencia
+python -m queryengine -f script.sql --plan          # un archivo, mostrando planes
+```
+
+Contra bloques reales en disco:
+
+```bash
+QE_STORAGE_BACKEND=disk QE_BLK01_PATH=../../storage python -m queryengine
 ```
 
 ---
@@ -62,7 +70,19 @@ SELECT * FROM empleados WHERE dept IS NOT NULL AND NOT salario < 6000;
 DELETE FROM empleados WHERE id = 101;
 
 EXPLAIN SELECT * FROM empleados WHERE id = 101;   -- planifica sin ejecutar
+
+-- Carga masiva: no pasa por el parser, una fila del CSV es una fila de la tabla
+COPY empleados FROM 'empleados.csv';
+COPY empleados FROM 'datos.tsv' WITH (HEADER FALSE, DELIMITER '\t', NULL 'NA');
+
+-- El tamano de bloque es una opcion de tabla, lo que el Experimento 4 varia
+CREATE TABLE grande (id INT PRIMARY KEY, monto FLOAT) WITH (PAGE_SIZE = 8192);
 ```
+
+`COPY` resuelve la ruta dentro de `QE_DATA_DIR` y no deja salir de ahí. Las
+cabeceras se emparejan sin distinguir mayúsculas, espacios ni guiones bajos, así
+que un CSV de Kaggle con `Employee_ID` alimenta una columna `id`. Las filas que
+no coaccionan se rechazan con su número de línea en vez de abortar la carga.
 
 **Tipos:** `INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BOOL`, `CHAR(n)`, `VARCHAR(n)`, `DATE`.
 El formato binario del registro se deriva de los tipos declarados, así que el motor
@@ -170,6 +190,17 @@ con BTREE    -> IndexScan (h=3)                estimado  ~3 bloques   medido  3 
 Devuelve, por tabla: motor, tamaño de página, `record_format`, bytes por
 registro, registros por página, filas, páginas, columnas e índices activos.
 
+### `POST /api/tables/load`
+
+```json
+{ "table": "viajes", "path": "viajes.csv", "header": true, "delimiter": "," }
+```
+
+Carga masiva desde un archivo dentro de `QE_DATA_DIR`. Responde con filas
+leídas, insertadas, rechazadas, filas por segundo y el costo en bloques. Es la
+vía para preparar los datasets de los experimentos: 20 000 filas entran en
+123 escrituras, una por página.
+
 ### `POST /api/tables/reorganize`
 
 ```json
@@ -238,20 +269,43 @@ Reglas que toda implementación debe cumplir:
 4. `search_key` y `range_key` solo tienen sentido en tablas `SEQUENTIAL`; en una
    `HEAP` pueden lanzar `NotImplementedError`, el planificador nunca las pide.
 
-Para enchufar la implementación real basta registrarla en
-`queryengine/bootstrap.py`; no se toca el parser, el planificador ni el ejecutor:
+Antes de enchufar una implementación hay que pasarla por la suite de
+conformidad, que fija lo que el ejecutor asume. Una prueba que falle significa
+que el motor devolvería filas incorrectas o reportaría mal el costo:
 
 ```python
-if settings.backend == "disk":
-    from storage_engine import DiskTableStore, DiskIndexStore   # módulo del compañero
-    storage = DiskTableStore(io, data_dir=settings.data_dir)
-    indexes = DiskIndexStore(io, data_dir=settings.data_dir)
+import pytest
+from queryengine.storage.port import IOCounter
+from queryengine.testing import StorageEngineContract
+
+class TestMiHeapFile(StorageEngineContract):
+    @pytest.fixture
+    def store(self, tmp_path):
+        return MiHeapFile(IOCounter(), str(tmp_path))
 ```
 
-Mientras tanto corre `MemoryTableStore` / `MemoryIndexStore`, que **no escriben a
-disco**: derivan el costo del `records_per_page` del esquema para ejercitar la
-telemetría de punta a punta. Sirven para desarrollar y testear, **no para medir**.
-Los benchmarks van contra los adaptadores reales.
+Para índices están `IndexManagerContract` (hash) y `RangeIndexContract` (B+).
+
+Los backends disponibles se registran en `queryengine/bootstrap.py`; el parser,
+el planificador y el ejecutor no se tocan:
+
+| Backend | Tablas | Índices |
+|---|---|---|
+| `memory` | sustituto en memoria | sustituto en memoria |
+| `disk` | bloques reales de 4 KB vía `storage/` | sustituto en memoria |
+
+`DiskTableStore` importa `Page`, `DiskManager` y `DiskCounter` desde el módulo
+de almacenamiento y **no reimplementa nada de eso**: aporta solo el nivel de
+tabla (un archivo por tabla, ubicación en inserción, recorrido completo,
+eliminación lógica y la serialización tupla ↔ bytes con mapa de nulos). Mantiene
+la página de cola en memoria entre inserciones, lo que baja el costo de una
+escritura por registro a una por página.
+
+Los sustitutos en memoria **no escriben a disco**: derivan el costo del
+`records_per_page` del esquema para ejercitar la telemetría de punta a punta.
+Sirven para desarrollar y testear, no para medir.
+
+El estado de la integración y lo que falta está en `INTEGRACION.md` en la raíz.
 
 ---
 
@@ -278,7 +332,14 @@ queryengine/
     executor.py     operadores iteradores
   storage/
     port.py         LOS PUERTOS: contrato con los demás bloques
-    memory.py       adaptador de desarrollo
+    memory.py       sustitutos en memoria para desarrollo
+    blk01.py        carga el módulo de almacenamiento físico
+    diskstore.py    tablas sobre bloques reales de 4 KB
+    codec.py        tupla <-> bytes, con mapa de nulos
+  testing/
+    contract.py     suite de conformidad de los puertos
+  loader.py         carga masiva de CSV
+  cli.py            cliente SQL de consola
   engine.py         fachada: parse -> plan -> ejecuta -> reporta costo
   bootstrap.py      cableado desde variables de entorno
   api/app.py        FastAPI
@@ -294,8 +355,11 @@ comparación contra una cadena; después es contra el entero `101`.
 
 | Variable | Por defecto | Para qué |
 |---|---|---|
-| `QE_STORAGE_BACKEND` | `memory` | Adaptador de almacenamiento |
+| `QE_STORAGE_BACKEND` | `memory` | `memory` (sustituto) o `disk` (bloques reales) |
 | `QE_CATALOG_PATH` | `data/catalog.json` | Catálogo persistente; `:memory:` lo desactiva |
+| `QE_DATA_DIR` | — | Directorio del que `COPY` puede leer |
+| `QE_TABLE_DIR` | `data/tables` | Dónde el backend de disco guarda un `.bin` por tabla |
+| `QE_BLK01_PATH` | `../../storage` | Módulo de almacenamiento físico a enlazar |
 
 ---
 
@@ -304,8 +368,11 @@ comparación contra una cadena; después es contra el entero `101`.
 - El catálogo se guarda en JSON. Es **metadata**, no datos de usuario: ninguna
   página, registro ni índice pasa por ahí. La prohibición de serializadores de
   alto nivel aplica al almacenamiento físico, que vive detrás de los puertos.
-- Para cargas masivas conviene un cargador que llame a `StorageEngine.insert`
-  directamente. Parsear un `INSERT` de 3 000 tuplas cuesta ~55 ms de lexer; a
-  500 000 filas eso domina el tiempo y contaminaría el Experimento 1.
+- Las cargas masivas van por `COPY`, que no pasa por el parser. Un `INSERT` de
+  3 000 tuplas cuesta ~55 ms solo de lexer; a 500 000 filas el parser, y no el
+  disco, sería lo que mide el Experimento 1.
+- Los cuatro experimentos se corren con
+  `python benchmarks/experiments.py --backend disk`, que deja un CSV por
+  experimento y un `RESUMEN.md` listo para el informe.
 - `EXPLAIN` planifica sin ejecutar: sirve para comparar el costo estimado contra
   el medido sin pagar la consulta.

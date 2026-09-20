@@ -1,0 +1,33 @@
+services:
+  storage:
+    build:
+      context: ./storage
+      dockerfile: Dockerfile
+    image: cs2042/storage:0.1.0
+    container_name: cs2042-storage
+    ports:
+      - "8000:8000"
+    volumes:
+      - storage-data:/data
+
+  query-engine:
+    build:
+      context: .
+      dockerfile: backend/query-engine/Dockerfile
+    image: cs2042/query-engine:0.1.0
+    container_name: cs2042-query-engine
+    ports:
+      - "8001:8001"
+    environment:
+      QE_STORAGE_BACKEND: disk
+      QE_CATALOG_PATH: /var/lib/cs2042/catalog.json
+      QE_TABLE_DIR: /var/lib/cs2042/tables
+      QE_DATA_DIR: /data
+      QE_BLK01_PATH: /app/storage
+    volumes:
+      - engine-data:/var/lib/cs2042
+      - ./data:/data:ro
+
+volumes:
+  storage-data:
+  engine-data:

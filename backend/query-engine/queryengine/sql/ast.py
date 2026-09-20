@@ -115,6 +115,7 @@ class CreateTable(Statement):
     table: str
     columns: tuple[ColumnDefinition, ...]
     storage: str
+    page_size: int | None = None
 
 
 @dataclass(frozen=True)
@@ -161,6 +162,23 @@ class Select(Statement):
 class Delete(Statement):
     table: str
     where: Expression | None = None
+
+
+@dataclass(frozen=True)
+class Copy(Statement):
+    """Bulk load of a delimited file straight into a table.
+
+    Parsing one INSERT per row would spend most of the load in the lexer, so a
+    dataset of hundreds of thousands of records comes in through this path and
+    never becomes SQL text.
+    """
+
+    table: str
+    path: str
+    columns: tuple[str, ...] | None = None
+    header: bool = True
+    delimiter: str = ","
+    null_token: str = ""
 
 
 @dataclass(frozen=True)

@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass, field
 
 from .catalog import (
+    DEFAULT_PAGE_SIZE,
     Catalog,
     Column,
     IndexKind,
@@ -20,6 +21,7 @@ from .catalog import (
 )
 from .errors import CatalogError, QueryEngineError
 from .execution import Executor
+from .loader import BulkLoader, LoadReport
 from .planner import Planner
 from .planner.plan import DeletePlan, InsertPlan, PlanNode
 from .sql import ast, parse
@@ -87,6 +89,7 @@ class QueryEngine:
         storage: StorageEngine,
         indexes: IndexManager,
         io: IOCounter | None = None,
+        data_dir: str | None = None,
     ):
         self._catalog = catalog
         self._storage = storage
@@ -94,6 +97,7 @@ class QueryEngine:
         self._io = io or storage.io
         self._planner = Planner(catalog, indexes)
         self._executor = Executor(catalog, storage, indexes)
+        self._loader = BulkLoader(catalog, storage, indexes, self._io, data_dir)
 
     @property
     def catalog(self) -> Catalog:
@@ -139,6 +143,7 @@ class QueryEngine:
                     "storage": schema.storage.value,
                     "page_size": schema.page_size,
                     "record_size": schema.record_size,
+                    "stored_record_size": schema.stored_record_size,
                     "records_per_page": schema.records_per_page,
                     "record_format": schema.record_format,
                     "row_count": statistics.row_count,
@@ -211,6 +216,8 @@ class QueryEngine:
             return self._select(statement, plan)
         if isinstance(statement, ast.Delete):
             return self._delete(statement, plan)
+        if isinstance(statement, ast.Copy):
+            return self._copy(statement)
         raise QueryEngineError(f"sentencia no soportada: {name}")
 
     # -- DDL ------------------------------------------------------------
@@ -229,6 +236,7 @@ class QueryEngine:
             name=statement.table,
             columns=columns,
             storage=StorageKind(statement.storage),
+            page_size=statement.page_size or DEFAULT_PAGE_SIZE,
         )
         self._catalog.create_table(schema)
         try:
@@ -309,6 +317,7 @@ class QueryEngine:
                 self._indexes.insert(meta.name, record[positions[meta.name]], rid)
             self._catalog.observe_row(schema.name, schema, record)
             inserted += 1
+        self._flush(schema.name)
         self._catalog.record_insert(schema.name, inserted)
         if isinstance(plan, InsertPlan):
             plan.row_count = inserted
@@ -339,12 +348,40 @@ class QueryEngine:
             for meta in indexes:
                 self._indexes.delete(meta.name, record[positions[meta.name]], rid)
             removed += 1
+        self._flush(schema.name)
         self._catalog.record_delete(schema.name, removed)
         return QueryResult(
             statement="Delete",
             affected_rows=removed,
             message=f"{removed} fila(s) eliminada(s) de '{schema.name}'",
         )
+
+    def _flush(self, table: str) -> None:
+        """Make buffered pages durable; a write-through store treats this as a no-op."""
+        flush = getattr(self._storage, "flush", None)
+        if flush is not None:
+            flush(table)
+
+    def _copy(self, statement: ast.Copy) -> QueryResult:
+        report = self._loader.load(
+            table=statement.table,
+            path=statement.path,
+            columns=statement.columns,
+            header=statement.header,
+            delimiter=statement.delimiter,
+            null_token=statement.null_token,
+        )
+        message = (
+            f"{report.rows_inserted} fila(s) cargada(s) en '{report.table}' "
+            f"desde '{report.path}' a {report.rows_per_second:,.0f} filas/s"
+        )
+        if report.rows_rejected:
+            message += f"; {report.rows_rejected} rechazada(s)"
+        return QueryResult(statement="Copy", affected_rows=report.rows_inserted, message=message)
+
+    def load(self, table: str, path: str, **options) -> LoadReport:
+        """Bulk load outside SQL, for benchmarks and data preparation."""
+        return self._loader.load(table, path, **options)
 
     # -- helpers --------------------------------------------------------
 

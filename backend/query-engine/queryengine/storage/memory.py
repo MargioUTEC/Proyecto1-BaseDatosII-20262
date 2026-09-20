@@ -144,6 +144,9 @@ class MemoryTableStore:
     def page_count(self, table: str) -> int:
         return self._table(table).page_count()
 
+    def flush(self, table: str | None = None) -> None:
+        """Nothing is buffered here; every write already landed."""
+
     def search_key(self, table: str, key) -> list[tuple[RID, Record]]:
         entry = self._require_ordered(table)
         self.io.read(self._binary_search_cost(entry))

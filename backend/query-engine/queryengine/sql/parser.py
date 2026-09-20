@@ -28,6 +28,7 @@ from .ast import (
     ColumnRef,
     Compare,
     Comparison,
+    Copy,
     CreateIndex,
     CreateTable,
     Delete,
@@ -82,6 +83,8 @@ class Parser:
             return self._select()
         if token.is_keyword("DELETE"):
             return self._delete()
+        if token.is_keyword("COPY"):
+            return self._copy()
         raise self._error(
             "se esperaba una sentencia (SELECT, INSERT, DELETE, CREATE, DROP) "
             f"y se encontro {token}"
@@ -105,8 +108,26 @@ class Parser:
         storage = "HEAP"
         if self._match_keyword("USING"):
             storage = self._one_of(_STORAGE_KINDS, "motor de almacenamiento")
+        page_size = self._table_options()
         self._reject_duplicate_primary_keys(columns)
-        return CreateTable(table, tuple(columns), storage)
+        return CreateTable(table, tuple(columns), storage, page_size)
+
+    def _table_options(self) -> int | None:
+        """WITH (PAGE_SIZE = 8192) -- lo que el experimento de tamano de bloque varia."""
+        if not self._match_keyword("WITH"):
+            return None
+        self._expect_punctuation("(")
+        page_size = None
+        while True:
+            option = self._identifier("nombre de opcion").upper()
+            if option != "PAGE_SIZE":
+                raise self._error(f"opcion de tabla desconocida: {option}")
+            self._expect_operator("=")
+            page_size = self._positive_integer("PAGE_SIZE")
+            if not self._match_punctuation(","):
+                break
+        self._expect_punctuation(")")
+        return page_size
 
     def _column_definition(self) -> ColumnDefinition:
         name = self._identifier("nombre de columna")
@@ -167,6 +188,41 @@ class Parser:
         while self._match_punctuation(","):
             rows.append(self._value_tuple())
         return Insert(table, columns, tuple(rows))
+
+    def _copy(self) -> Copy:
+        self._expect_keyword("COPY")
+        table = self._identifier("nombre de tabla")
+        columns: tuple[str, ...] | None = None
+        if self._match_punctuation("("):
+            names = [self._identifier("nombre de columna")]
+            while self._match_punctuation(","):
+                names.append(self._identifier("nombre de columna"))
+            self._expect_punctuation(")")
+            columns = tuple(names)
+        self._expect_keyword("FROM")
+        path = self._string("ruta del archivo")
+
+        header, delimiter, null_token = True, ",", ""
+        if self._match_keyword("WITH"):
+            self._expect_punctuation("(")
+            while True:
+                if self._match_keyword("HEADER"):
+                    header = self._boolean(default=True)
+                elif self._match_keyword("DELIMITER"):
+                    delimiter = self._string("delimitador")
+                    if len(delimiter) != 1:
+                        raise self._error("el delimitador debe ser un solo caracter")
+                elif self._match_keyword("NULL"):
+                    null_token = self._string("marcador de NULL")
+                else:
+                    raise self._error(
+                        f"opcion de COPY desconocida: {self._current()} "
+                        "(se admiten HEADER, DELIMITER, NULL)"
+                    )
+                if not self._match_punctuation(","):
+                    break
+            self._expect_punctuation(")")
+        return Copy(table, path, columns, header, delimiter, null_token)
 
     def _value_tuple(self) -> tuple[Expression, ...]:
         self._expect_punctuation("(")
@@ -355,6 +411,25 @@ class Parser:
             self._advance()
             return text
         raise self._error(f"se esperaba un {what} ({' o '.join(options)}) y se encontro {token}")
+
+    def _string(self, what: str) -> str:
+        token = self._current()
+        if token.type is TokenType.STRING:
+            self._advance()
+            return token.value
+        raise self._error(f"se esperaba un {what} entre comillas simples y se encontro {token}")
+
+    def _boolean(self, default: bool) -> bool:
+        if self._match_keyword("TRUE"):
+            return True
+        if self._match_keyword("FALSE"):
+            return False
+        return default
+
+    def _expect_operator(self, symbol: str) -> Token:
+        if not self._current().is_operator(symbol):
+            raise self._error(f"se esperaba '{symbol}' y se encontro {self._current()}")
+        return self._advance()
 
     def _positive_integer(self, what: str) -> int:
         token = self._current()

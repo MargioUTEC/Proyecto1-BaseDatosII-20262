@@ -15,6 +15,15 @@ class ReorganizeRequest(BaseModel):
     table: str = Field(..., min_length=1, description="Tabla SEQUENTIAL a reorganizar")
 
 
+class LoadRequest(BaseModel):
+    table: str = Field(..., min_length=1)
+    path: str = Field(..., min_length=1, description="Ruta relativa a QE_DATA_DIR")
+    header: bool = True
+    delimiter: str = Field(",", min_length=1, max_length=1)
+    null_token: str = ""
+    limit: int | None = Field(None, gt=0)
+
+
 class MetricsModel(BaseModel):
     parse_ms: float
     plan_ms: float

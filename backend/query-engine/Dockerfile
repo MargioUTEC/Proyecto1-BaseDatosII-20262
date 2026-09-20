@@ -1,17 +1,24 @@
+# Build context is the repository root, so the physical storage module can be
+# copied in alongside the engine that binds to it.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    QE_CATALOG_PATH=/data/catalog.json
+    QE_CATALOG_PATH=/var/lib/cs2042/catalog.json \
+    QE_TABLE_DIR=/var/lib/cs2042/tables \
+    QE_BLK01_PATH=/app/storage
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY backend/query-engine/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY queryengine ./queryengine
+COPY backend/query-engine/queryengine ./queryengine
+COPY storage/config.py storage/page.py storage/disk_management.py ./storage/
 
-RUN mkdir -p /data && useradd --create-home --uid 1000 engine && chown -R engine /data /app
+RUN mkdir -p /var/lib/cs2042 /data \
+    && useradd --create-home --uid 1000 engine \
+    && chown -R engine /var/lib/cs2042 /data /app
 USER engine
 
 EXPOSE 8001

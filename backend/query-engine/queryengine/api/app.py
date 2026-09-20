@@ -16,7 +16,13 @@ from fastapi.responses import JSONResponse
 from .. import __version__
 from ..bootstrap import build_engine
 from ..errors import QueryEngineError
-from .schemas import ErrorResponse, QueryRequest, QueryResponse, ReorganizeRequest
+from .schemas import (
+    ErrorResponse,
+    LoadRequest,
+    QueryRequest,
+    QueryResponse,
+    ReorganizeRequest,
+)
 
 
 def create_app() -> FastAPI:
@@ -54,6 +60,18 @@ def create_app() -> FastAPI:
     @app.get("/api/tables")
     async def list_tables() -> dict:
         return {"tables": app.state.engine.tables()}
+
+    @app.post("/api/tables/load")
+    async def load_table(request: LoadRequest) -> dict:
+        report = app.state.engine.load(
+            request.table,
+            request.path,
+            header=request.header,
+            delimiter=request.delimiter,
+            null_token=request.null_token,
+            limit=request.limit,
+        )
+        return report.to_dict()
 
     @app.post("/api/tables/reorganize")
     async def reorganize(request: ReorganizeRequest) -> dict:

@@ -78,6 +78,16 @@ class Planner:
             )
         if isinstance(statement, ast.DropIndex):
             return DDLPlan(operation="DropIndex", target=statement.name)
+        if isinstance(statement, ast.Copy):
+            schema = self._catalog.table(statement.table)
+            return DDLPlan(
+                operation="Copy",
+                target=schema.name,
+                attributes={
+                    "from": statement.path,
+                    "indexes": len(self._catalog.indexes_on(schema.name)),
+                },
+            )
         raise PlannerError(f"no hay plan para {type(statement).__name__}")
 
     # -- statements -----------------------------------------------------

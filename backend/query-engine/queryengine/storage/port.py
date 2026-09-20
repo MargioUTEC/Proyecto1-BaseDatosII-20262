@@ -129,6 +129,15 @@ class StorageEngine(Protocol):
     def reorganize(self, table: str) -> ReorganizeReport:
         """Merge the overflow area back into the ordered area."""
 
+    def flush(self, table: str | None = None) -> None:
+        """Push any buffered page to disk.
+
+        An implementation that keeps the tail page in memory between inserts --
+        the difference between one write per record and one write per page --
+        makes those writes durable here. The engine calls it after every
+        statement that modifies data. A store that writes through may no-op.
+        """
+
 
 @runtime_checkable
 class IndexManager(Protocol):

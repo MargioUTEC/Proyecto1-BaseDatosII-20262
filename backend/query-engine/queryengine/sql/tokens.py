@@ -18,10 +18,11 @@ class TokenType(Enum):
 
 KEYWORDS = frozenset(
     {
-        "AND", "AS", "ASC", "BETWEEN", "BY", "CREATE", "DELETE", "DESC", "DROP",
-        "EXPLAIN", "FALSE", "FROM", "INDEX", "INSERT", "INTO", "IS", "KEY",
-        "LIMIT", "NOT", "NULL", "ON", "OR", "ORDER", "PRIMARY", "SELECT",
-        "TABLE", "TRUE", "USING", "VALUES", "WHERE",
+        "AND", "AS", "ASC", "BETWEEN", "BY", "COPY", "CREATE", "DELETE",
+        "DELIMITER", "DESC", "DROP", "EXPLAIN", "FALSE", "FROM", "HEADER",
+        "INDEX", "INSERT", "INTO", "IS", "KEY", "LIMIT", "NOT", "NULL", "ON",
+        "OR", "ORDER", "PRIMARY", "SELECT", "TABLE", "TRUE", "USING", "VALUES",
+        "WHERE", "WITH",
     }
 )
 

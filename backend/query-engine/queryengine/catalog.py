@@ -19,7 +19,10 @@ from .errors import CatalogError
 from .types import ColumnType, parse_type
 
 DEFAULT_PAGE_SIZE = 4096
-PAGE_HEADER_SIZE = 24  # page_id, record_count, free_space_offset, next, prev + padding
+# Mirrors the physical page layout: five 32-bit header fields, and a slot
+# directory entry of (offset, length) as two unsigned shorts per record.
+PAGE_HEADER_SIZE = 20
+SLOT_SIZE = 4
 
 
 class StorageKind(Enum):
@@ -159,9 +162,19 @@ class TableSchema:
         return struct.calcsize(self.record_format)
 
     @property
+    def null_bitmap_size(self) -> int:
+        """One bit per column, rounded up to whole bytes."""
+        return (len(self.columns) + 7) // 8
+
+    @property
+    def stored_record_size(self) -> int:
+        """Bytes a record occupies on a page, null bitmap included."""
+        return self.record_size + self.null_bitmap_size
+
+    @property
     def records_per_page(self) -> int:
         usable = self.page_size - PAGE_HEADER_SIZE
-        return max(1, usable // (self.record_size + 1))  # +1 byte for the slot bitmap
+        return max(1, usable // (self.stored_record_size + SLOT_SIZE))
 
     @property
     def primary_key(self) -> Column | None:
