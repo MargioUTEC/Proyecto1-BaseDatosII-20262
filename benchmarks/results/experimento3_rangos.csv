@@ -1,0 +1,6 @@
+selectividad,filas,ruta_elegida,lecturas,ms
+0.1%,100,IndexRangeScan,105,2.301
+1.0%,1000,SeqScan,613,197.834
+5.0%,5000,SeqScan,613,198.841
+10.0%,10000,SeqScan,613,202.262
+25.0%,25000,SeqScan,613,213.427

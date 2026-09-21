@@ -101,20 +101,15 @@ class DiskTableStore:
         key = schema.name.lower()
         if key in self._tables:
             return  # reopening a table the catalog already knows
-        if schema.page_size != self._layer.page_size:
-            raise StorageUnavailableError(
-                f"'{schema.name}' declara paginas de {schema.page_size} B pero la capa fisica "
-                f"esta compilada para {self._layer.page_size} B. Para variar el tamano de bloque "
-                "el modulo de almacenamiento debe recibirlo como parametro, no como constante."
-            )
+        self._check_page_size(schema)
         codec = RecordCodec(schema)
-        capacity = self._layer.page_size - self._layer.header_size
+        capacity = schema.page_size - self._layer.header_size
         if codec.size + self._layer.slot_size > capacity:
             raise StorageUnavailableError(
                 f"un registro de '{schema.name}' ocupa {codec.size} bytes y no entra en una "
-                f"pagina de {self._layer.page_size} bytes"
+                f"pagina de {schema.page_size} bytes"
             )
-        manager = self._layer.DiskManager(self._path(schema.name))
+        manager = self._new_manager(schema)
         self._bridge.attach(manager.counter)
         self._tables[key] = _Table(schema, manager, codec)
         self._bridge.sync()
@@ -216,6 +211,42 @@ class DiskTableStore:
 
     # -- internals ------------------------------------------------------
 
+    def _check_page_size(self, schema: TableSchema) -> None:
+        if schema.page_size == self._layer.page_size:
+            return
+        if not self._layer.variable_page_size:
+            raise StorageUnavailableError(
+                f"'{schema.name}' declara paginas de {schema.page_size} B pero la capa fisica "
+                f"esta fijada en {self._layer.page_size} B. Para variar el tamano de bloque, "
+                "Page y DiskManager deben aceptar page_size."
+            )
+        limit = self._layer.max_page_size()
+        if schema.page_size > limit:
+            raise StorageUnavailableError(
+                f"'{schema.name}' pide paginas de {schema.page_size} B, pero el directorio de "
+                f"slots direcciona hasta {limit} B"
+            )
+
+    def _new_manager(self, schema: TableSchema):
+        path = self._path(schema.name)
+        if self._layer.variable_page_size:
+            return self._layer.DiskManager(path, page_size=schema.page_size)
+        return self._layer.DiskManager(path)
+
+    def _new_page(self, entry: _Table, page_id: int, previous: int):
+        if self._layer.variable_page_size:
+            return self._layer.Page(
+                page_id=page_id, prev_page_id=previous, page_size=entry.schema.page_size
+            )
+        return self._layer.Page(page_id=page_id, prev_page_id=previous)
+
+    def _load_page(self, entry: _Table, page_id: int, raw: bytes):
+        if self._layer.variable_page_size:
+            return self._layer.Page(
+                page_id=page_id, raw_bytes=raw, page_size=entry.schema.page_size
+            )
+        return self._layer.Page(page_id=page_id, raw_bytes=raw)
+
     def _path(self, table: str) -> str:
         return os.path.join(self._data_dir, f"{table.lower()}.bin")
 
@@ -263,13 +294,13 @@ class DiskTableStore:
         else:
             page_id = entry.manager.get_total_pages()
             previous = page_id - 1
-        entry.tail = self._layer.Page(page_id=page_id, prev_page_id=previous)
+        entry.tail = self._new_page(entry, page_id, previous)
         entry.dirty = True
 
     def _read(self, entry: _Table, page_id: int):
         raw = entry.manager.read_page(page_id)
         self._bridge.sync()
-        return self._layer.Page(page_id=page_id, raw_bytes=raw)
+        return self._load_page(entry, page_id, raw)
 
     def _tombstone(self, page, slot: int) -> None:
         """Mark a slot free by zeroing its length, the absence the page reports."""

@@ -40,13 +40,30 @@ SELECT ... WHERE id = 19999     ->  SeqScan   123 lecturas   (estimado 123)
 ```
 
 El costo estimado por el planificador coincide con el medido por el
-`DiskCounter`. Los cuatro experimentos corren con
-`python benchmarks/experiments.py --backend disk`.
+`DiskCounter`.
+
+Los cuatro experimentos corren sobre disco a la escala que pide el enunciado
+(`N` hasta 500 000). Resultados en `benchmarks/results/`:
+
+```
+python benchmarks/experiments.py --backend disk        # ~3 min
+```
+
+| Experimento | Resultado |
+|---|---|
+| 1 · Inserción masiva | Heap escribe una página por bloque: 3 068 escrituras para 500 000 filas |
+| 2 · Igualdad (N=100k) | Full Scan 613 lecturas · B+ 4 · Hash 2 |
+| 3 · Selectividad | El cruce cae entre 0,1 % (IndexRangeScan, 105) y 1 % (SeqScan, 613) |
+| 4 · Tamaño de bloque | Fan-out 40 / 81 / 163 / 326 registros por página para 1–8 KB |
+
+Los números de índice del Experimento 1 salen del sustituto en memoria, que
+cuesta una escritura por clave; un árbol B+ real con buffer escribirá mucho
+menos. Hay que rehacer esa fila cuando llegue BLK 03.
 
 ## Suite de conformidad
 
 Antes de enchufar una implementación nueva, hay que pasarla por el contrato.
-Son 23 pruebas que fijan lo que el ejecutor asume; una que falle significa que
+Son 25 pruebas que fijan lo que el ejecutor asume; una que falle significa que
 el motor devolvería filas incorrectas o reportaría mal el costo.
 
 ```python
@@ -64,23 +81,7 @@ Para índices están `IndexManagerContract` (hash) y `RangeIndexContract` (B+).
 
 ## Lo que falta
 
-### 1. `PAGE_SIZE` tiene que ser un parámetro — bloquea el Experimento 4
-
-`storage/config.py` define `PAGE_SIZE = 4096` como constante de módulo, y
-`page.py` la lee al importarse. El enunciado exige correr con
-`B ∈ [1024, 2048, 4096, 8192]` y medir el efecto en el fan-out, la altura del
-árbol y el total de I/O. Hoy solo se puede medir 4096:
-
-```
-E4 B= 1024  omitido: la capa fisica esta compilada para 4096 B
-E4 B= 4096    163 reg/pag
-```
-
-Hace falta que `Page` y `DiskManager` reciban el tamaño en el constructor
-(`Page(page_id, page_size=...)`), con 4096 por defecto. El motor ya lo soporta:
-`CREATE TABLE ... WITH (PAGE_SIZE = 8192)` y valida que coincidan.
-
-### 2. Sequential File — BLK 02
+### 1. Sequential File — BLK 02
 
 `search_key`, `range_key` y `reorganize` todavía no tienen implementación en
 disco, así que una tabla `USING SEQUENTIAL` reporta el hueco en vez de fingir
@@ -88,14 +89,14 @@ estar ordenada. Falta el área principal ordenada, el overflow encadenado y la
 reorganización con fill factor 70–80 %. El planificador ya emite
 `SequentialSearch` y `SequentialRangeScan` cuando corresponde.
 
-### 3. Índices en disco — BLK 03 y BLK 04
+### 2. Índices en disco — BLK 03 y BLK 04
 
 Mientras el árbol B+ y el hash dinámico no existan, el backend `disk` combina
 tablas en disco con **índices en memoria**, para que las rutas de acceso se
 puedan ejercitar de punta a punta. Los números de índice del Experimento 1
 salen de ese sustituto, no de un árbol real: hay que rehacerlos cuando lleguen.
 
-### 4. El servicio HTTP de `storage/` no está en el camino de datos
+### 3. El servicio HTTP de `storage/` no está en el camino de datos
 
 `storage/main.py` expone las páginas por HTTP con los registros en base64. Es
 útil para inspeccionar bloques y para la demo, pero el motor **no** lo usa: un
@@ -103,16 +104,27 @@ escaneo de 500 000 filas serían cientos de miles de llamadas HTTP y la latencia
 de red se comería la medición de I/O. El motor importa el módulo en proceso y
 ambos se despliegan juntos con `docker compose`.
 
-### 5. Detalles menores de la capa física
+## Cambios hechos sobre `storage/`
 
-- `allocate_page` abre el archivo en modo `a+b` y luego hace `seek`; en POSIX el
-  modo append ignora el `seek` y siempre escribe al final. Funciona porque el
-  destino coincide con el final, pero es frágil: conviene `r+b`.
-- `SLOT_FORMAT = "<HH"` limita offset y longitud a 65 535, así que una página
-  mayor a 64 KB rompería el directorio de slots. No estorba a 4 u 8 KB.
-- El motor evita `allocate_page` al abrir una página nueva, porque escribe un
-  bloque de ceros que el flush sobrescribe de inmediato: eran dos escrituras por
-  página en vez de una.
+Tres cambios sobre la capa física, todos aditivos y retrocompatibles
+(`storage/test_storage.py` sigue pasando sin tocarlo):
+
+1. **`PAGE_SIZE` pasó de constante a parámetro.** `Page(page_id, ..., page_size=PAGE_SIZE)`
+   y `DiskManager(db_path, page_size=PAGE_SIZE)` conservan 4096 por defecto. Sin
+   esto el Experimento 4 era imposible: el enunciado exige medir con
+   `B ∈ [1024, 2048, 4096, 8192]` y la capa quedaba fijada en 4096.
+   El adaptador detecta si el módulo acepta el parámetro, así que también
+   funciona contra la versión anterior — solo que ahí no puede variar `B`.
+2. **`allocate_page` pasó de modo `a+b` a `r+b`.** En POSIX el modo append ignora
+   el `seek` y escribe siempre al final: funcionaba solo porque el destino
+   coincidía con el final del archivo, y habría ocultado cualquier error de
+   offset.
+3. **`storage/Dockerfile`** estaba vacío (0 bytes); ahora levanta el servicio.
+
+Queda un detalle sin tocar: `SLOT_FORMAT = "<HH"` limita offset y longitud a
+65 535, así que una página mayor a 64 KB rompería el directorio de slots. No
+estorba a 4 u 8 KB, y el adaptador rechaza cualquier `PAGE_SIZE` por encima de
+ese límite en vez de corromper la página.
 
 ## Levantar todo
 
@@ -125,6 +137,6 @@ O solo el motor, en local:
 ```bash
 cd backend/query-engine
 pip install -r requirements-dev.txt
-pytest                                     # 165 pruebas
+pytest                                     # 175 pruebas
 QE_STORAGE_BACKEND=disk python -m queryengine
 ```

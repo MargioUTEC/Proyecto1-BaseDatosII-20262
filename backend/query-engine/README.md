@@ -17,7 +17,7 @@ cd backend/query-engine
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
 
-pytest                                              # 165 pruebas
+pytest                                              # 175 pruebas
 uvicorn queryengine.api.app:app --reload --port 8001
 ```
 
@@ -78,6 +78,10 @@ COPY empleados FROM 'datos.tsv' WITH (HEADER FALSE, DELIMITER '\t', NULL 'NA');
 -- El tamano de bloque es una opcion de tabla, lo que el Experimento 4 varia
 CREATE TABLE grande (id INT PRIMARY KEY, monto FLOAT) WITH (PAGE_SIZE = 8192);
 ```
+
+`PAGE_SIZE` llega hasta el archivo: los bloques en disco miden exactamente lo
+declarado. El adaptador comprueba que la capa fisica acepte el parametro y
+rechaza cualquier tamano que el directorio de slots no pueda direccionar.
 
 `COPY` resuelve la ruta dentro de `QE_DATA_DIR` y no deja salir de ahí. Las
 cabeceras se emparejan sin distinguir mayúsculas, espacios ni guiones bajos, así

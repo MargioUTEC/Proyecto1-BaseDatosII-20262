@@ -10,6 +10,7 @@ sync on either side.
 from __future__ import annotations
 
 import importlib
+import inspect
 import os
 import sys
 from dataclasses import dataclass
@@ -32,6 +33,21 @@ class PhysicalLayer:
     slot_size: int
     slot_format: str
     source: str
+    variable_page_size: bool = False
+    """True when Page and DiskManager accept a page_size argument.
+
+    Detected rather than assumed, so the adapter keeps working against a
+    version of the module whose block size is still a module constant -- it
+    just cannot offer anything but the default size there.
+    """
+
+    def max_page_size(self) -> int:
+        """Largest block the slot directory can address.
+
+        Slot offsets are packed as unsigned shorts, so a block over 64 KiB
+        would silently wrap.
+        """
+        return min(1 << (8 * self.slot_size // 2), 1 << 16)
 
 
 def load(path: str | None = None) -> PhysicalLayer:
@@ -70,4 +86,13 @@ def load(path: str | None = None) -> PhysicalLayer:
         slot_size=page_module.SLOT_SIZE,
         slot_format=page_module.SLOT_FORMAT,
         source=directory,
+        variable_page_size=_accepts_page_size(page_module.Page)
+        and _accepts_page_size(disk_module.DiskManager),
     )
+
+
+def _accepts_page_size(target: type) -> bool:
+    try:
+        return "page_size" in inspect.signature(target.__init__).parameters
+    except (TypeError, ValueError):  # pragma: no cover - builtins have no signature
+        return False
