@@ -190,6 +190,24 @@ def search_index(key: int):
       "index_disk_reads": metrics["disk_reads"]
   }
 
+@app.get("/index/search_range/")
+def search_index_range(start_key: int, end_key: int):
+  """Busca un rango de llaves en el Árbol B+ y retorna una lista de RIDs."""
+  # Reiniciamos para contar cuántas páginas lee exactamente este escaneo de rango
+  dm_index.counter.reset() 
+  
+  results = bptree.rangeSearch(start_key, end_key)
+  
+  metrics = dm_index.counter.get_metrics()
+  return {
+      "start_key": start_key,
+      "end_key": end_key,
+      "results_count": len(results),
+      # Formateamos la lista de tuplas (page, slot) a un formato JSON amigable
+      "rids": [{"page_id": r[0], "slot_number": r[1]} for r in results],
+      "index_disk_reads": metrics["disk_reads"]
+  }
+
 
 # ==========================================
 # ACTUALIZACIÓN DE TELEMETRÍA
