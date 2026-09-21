@@ -61,7 +61,7 @@ class BPlusTree:
         """Lee una página física del disco y la deserializa a un diccionario (Nodo)"""
         if page_id == -1: return None
         
-        # Lectura mediante DiskManager (el DiskCounter sumará automáticamente)
+        # Lectura mediante DiskManager 
         data = self.dm.read_page(page_id)
         
         pid, is_leaf, num_keys, next_p, prev_p = struct.unpack_from(NODE_HEADER_FORMAT, data, 0)
