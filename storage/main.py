@@ -4,6 +4,7 @@ from disk_management import DiskManager
 from fastapi import FastAPI, HTTPException
 from page import Page
 from pydantic import BaseModel
+from bplus_tree import BPlusTree
 
 app = FastAPI(
     title="Physical Storage Engine API",
@@ -16,7 +17,12 @@ app = FastAPI(
 
 # Instancia global de DiskManager apuntando a la base de datos binaria
 DB_FILENAME = "engine_data.bin"
-dm = DiskManager(DB_FILENAME)
+dm_heap = DiskManager(DB_FILENAME)
+
+# B+ Gestor para el índice
+IDX_FILENAME = "engine_index.idx"
+dm_index = DiskManager(IDX_FILENAME)
+bptree = BPlusTree(dm_index)
 
 
 # Modelos de entrada / salida
@@ -46,6 +52,13 @@ class PageHeaderResponse(BaseModel):
   prev_page_id: int
 
 
+# --- [NUEVO] MODELO PARA EL ÍNDICE ---
+class IndexInsertRequest(BaseModel):
+  key: int
+  page_id: int
+  slot_number: int
+
+
 @app.get("/")
 def root():
   return {
@@ -58,12 +71,12 @@ def root():
 @app.post("/pages/allocate", response_model=AllocateResponse)
 def allocate_page():
   """Reserva una nueva página vacía de 4096 bytes en disco."""
-  new_page_id = dm.allocate_page()
+  new_page_id = dm_heap.allocate_page()
   # Inicializa la cabecera básica de la página
   page = Page(page_id=new_page_id)
-  dm.write_page(new_page_id, page.to_bytes())
+  dm_heap.write_page(new_page_id, page.to_bytes())
 
-  metrics = dm.counter.get_metrics()
+  metrics = dm_heap.counter.get_metrics()
   return AllocateResponse(
       page_id=new_page_id, disk_writes=metrics["disk_writes"]
   )
@@ -73,7 +86,7 @@ def allocate_page():
 def get_page_header(page_id: int):
   """Lee el bloque y retorna únicamente los metadatos de su cabecera."""
   try:
-    raw_block = dm.read_page(page_id)
+    raw_block = dm_heap.read_page(page_id)
   except IndexError:
     raise HTTPException(status_code=404, detail="Página no encontrada")
 
@@ -91,7 +104,7 @@ def get_page_header(page_id: int):
 def insert_record(req: RecordInsertRequest):
   """Inserta los bytes de una tupla en el bloque indicado y devuelve su RID."""
   try:
-    raw_block = dm.read_page(req.page_id)
+    raw_block = dm_heap.read_page(req.page_id)
   except IndexError:
     raise HTTPException(status_code=404, detail="Página no encontrada")
 
@@ -108,9 +121,9 @@ def insert_record(req: RecordInsertRequest):
     )
 
   # Persistir los cambios en disco
-  dm.write_page(req.page_id, page.to_bytes())
+  dm_heap.write_page(req.page_id, page.to_bytes())
 
-  metrics = dm.counter.get_metrics()
+  metrics = dm_heap.counter.get_metrics()
   return RecordInsertResponse(
       page_id=req.page_id,
       slot_number=slot_number,
@@ -123,7 +136,7 @@ def insert_record(req: RecordInsertRequest):
 def get_record(page_id: int, slot_number: int):
   """Recupera los bytes exactos de una tupla mediante su RID."""
   try:
-    raw_block = dm.read_page(page_id)
+    raw_block = dm_heap.read_page(page_id)
   except IndexError:
     raise HTTPException(status_code=404, detail="Página no encontrada")
 
@@ -142,14 +155,72 @@ def get_record(page_id: int, slot_number: int):
   }
 
 
+# ==========================================
+# [NUEVO] ENDPOINTS PARA EL ÁRBOL B+
+# ==========================================
+
+@app.post("/index/insert")
+def insert_index_entry(req: IndexInsertRequest):
+  """Inserta una llave y su RID (page_id, slot) en el Árbol B+."""
+  # Insertamos pasando la llave y una tupla que representa el RID
+  bptree.insert(req.key, (req.page_id, req.slot_number))
+  
+  metrics = dm_index.counter.get_metrics()
+  return {
+      "message": "Index entry inserted successfully",
+      "key": req.key,
+      "index_disk_writes": metrics["disk_writes"]
+  }
+
+@app.get("/index/search/{key}")
+def search_index(key: int):
+  """Busca una llave en el Árbol B+ y retorna su RID asociado."""
+  # Reiniciamos el contador opcionalmente si deseas medir lecturas exactas por consulta
+  dm_index.counter.reset() 
+  
+  rid = bptree.search(key)
+  
+  if rid is None:
+      raise HTTPException(status_code=404, detail="Key no encontrada en el índice")
+      
+  metrics = dm_index.counter.get_metrics()
+  return {
+      "key": key,
+      "rid": {"page_id": rid[0], "slot_number": rid[1]},
+      "index_disk_reads": metrics["disk_reads"]
+  }
+
+
+# ==========================================
+# ACTUALIZACIÓN DE TELEMETRÍA
+# ==========================================
+
 @app.get("/telemetry/metrics")
 def get_telemetry():
-  """Retorna la telemetría obligatoria de I/O."""
-  return dm.counter.get_metrics()
+  """Retorna la telemetría obligatoria de I/O, separada por archivo."""
+  heap_metrics = dm_heap.counter.get_metrics()
+  index_metrics = dm_index.counter.get_metrics()
+  
+  return {
+      "heap_file": heap_metrics,
+      "bplus_tree": index_metrics,
+      "total": {
+          "disk_reads": heap_metrics["disk_reads"] + index_metrics["disk_reads"],
+          "disk_writes": heap_metrics["disk_writes"] + index_metrics["disk_writes"]
+      }
+  }
 
 
 @app.post("/telemetry/reset")
 def reset_telemetry():
   """Reinicia los contadores de disco para iniciar un nuevo experimento."""
-  dm.counter.reset()
-  return {"status": "reset_successful", "metrics": dm.counter.get_metrics()}
+  dm_heap.counter.reset()
+  dm_index.counter.reset()
+  
+  return {
+      "status": "reset_successful", 
+      "metrics": {
+          "heap_file": dm_heap.counter.get_metrics(),
+          "bplus_tree": dm_index.counter.get_metrics()
+      }
+  }
