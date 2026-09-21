@@ -134,6 +134,8 @@ class QueryEngine:
         return result
 
     def tables(self) -> list[dict]:
+        describe = getattr(self._indexes, "describe", None)
+        routes = describe() if describe is not None else {}
         listing = []
         for schema in self._catalog.tables():
             statistics = self._catalog.statistics(schema.name)
@@ -159,7 +161,12 @@ class QueryEngine:
                         for column in schema.columns
                     ],
                     "indexes": [
-                        {"name": meta.name, "column": meta.column, "kind": meta.kind.value}
+                        {
+                            "name": meta.name,
+                            "column": meta.column,
+                            "kind": meta.kind.value,
+                            "backend": routes.get(meta.name.lower(), "sustituto en memoria"),
+                        }
                         for meta in self._catalog.indexes_on(schema.name)
                     ],
                 }

@@ -14,7 +14,7 @@ COPY backend/query-engine/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/query-engine/queryengine ./queryengine
-COPY storage/config.py storage/page.py storage/disk_management.py ./storage/
+COPY storage/*.py ./storage/
 
 RUN mkdir -p /var/lib/cs2042 /data \
     && useradd --create-home --uid 1000 engine \

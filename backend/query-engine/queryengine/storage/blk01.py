@@ -33,6 +33,7 @@ class PhysicalLayer:
     slot_size: int
     slot_format: str
     source: str
+    BPlusTree: type | None = None
     variable_page_size: bool = False
     """True when Page and DiskManager accept a page_size argument.
 
@@ -63,6 +64,7 @@ def load(path: str | None = None) -> PhysicalLayer:
         config = importlib.import_module("config")
         page_module = importlib.import_module("page")
         disk_module = importlib.import_module("disk_management")
+        tree_module = _optional("bplus_tree")
     except ImportError as exc:
         raise StorageUnavailableError(
             f"el modulo de almacenamiento en '{directory}' no se pudo importar: {exc}"
@@ -86,9 +88,18 @@ def load(path: str | None = None) -> PhysicalLayer:
         slot_size=page_module.SLOT_SIZE,
         slot_format=page_module.SLOT_FORMAT,
         source=directory,
+        BPlusTree=getattr(tree_module, "BPlusTree", None) if tree_module else None,
         variable_page_size=_accepts_page_size(page_module.Page)
         and _accepts_page_size(disk_module.DiskManager),
     )
+
+
+def _optional(name: str):
+    """Import a module that may not exist yet, without failing the load."""
+    try:
+        return importlib.import_module(name)
+    except ImportError:
+        return None
 
 
 def _accepts_page_size(target: type) -> bool:

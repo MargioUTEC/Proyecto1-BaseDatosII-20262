@@ -63,8 +63,9 @@ def build_engine(settings: Settings | None = None) -> QueryEngine:
         from .storage.blk01 import load
         from .storage.diskstore import DiskTableStore
 
-        storage = DiskTableStore(io, settings.table_dir, load(settings.physical_path))
-        indexes = MemoryIndexStore(io)
+        layer = load(settings.physical_path)
+        storage = DiskTableStore(io, settings.table_dir, layer)
+        indexes = _index_backend(io, settings, layer)
     else:
         raise ValueError(
             f"backend de almacenamiento desconocido: '{settings.backend}'. "
@@ -74,6 +75,22 @@ def build_engine(settings: Settings | None = None) -> QueryEngine:
     engine = QueryEngine(catalog, storage, indexes, io, settings.data_dir)
     _reopen_existing_tables(engine, storage)
     return engine
+
+
+def _index_backend(io: IOCounter, settings: Settings, layer):
+    """The on-disk B+ tree when the module ships one, with memory behind it.
+
+    Indexes the tree cannot serve -- hash, non-integer keys, repeated keys --
+    are routed to the in-memory stand-in so they still work.
+    """
+    if layer.BPlusTree is None:
+        return MemoryIndexStore(io)
+    from .storage.diskindex import DiskIndexStore
+    from .storage.routing import RoutingIndexStore
+
+    return RoutingIndexStore(
+        DiskIndexStore(io, settings.table_dir, layer), MemoryIndexStore(io), io
+    )
 
 
 def _reopen_existing_tables(engine: QueryEngine, storage) -> None:

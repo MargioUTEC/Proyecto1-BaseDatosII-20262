@@ -8,7 +8,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY config.py page.py disk_management.py main.py ./
+COPY *.py ./
 
 RUN mkdir -p /data && useradd --create-home --uid 1000 storage && chown -R storage /data /app
 USER storage

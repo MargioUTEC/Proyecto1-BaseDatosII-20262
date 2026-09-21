@@ -8,10 +8,10 @@ consultas (`backend/query-engine/`), y lo que falta para cerrar el Entregable 1.
 El motor no abre archivos. Depende de dos protocolos declarados en
 `backend/query-engine/queryengine/storage/port.py`:
 
-| Puerto | Qué resuelve | Quién lo implementa |
+| Puerto | Qué resuelve | Implementación actual |
 |---|---|---|
-| `StorageEngine` | tablas: insert, fetch, scan, delete, reorganize | BLK 01 + BLK 02 |
-| `IndexManager` | índices: search, range_search, height | BLK 03 + BLK 04 |
+| `StorageEngine` | tablas: insert, fetch, scan, delete, reorganize | `DiskTableStore` sobre `Page` + `DiskManager` |
+| `IndexManager` | índices: search, range_search, height | `DiskIndexStore` sobre `BPlusTree`, con ruteo |
 
 `DiskTableStore` (`storage/diskstore.py`) enchufa la capa física existente contra
 el primer puerto. **Usa `Page`, `DiskManager` y `DiskCounter` tal como están**,
@@ -51,14 +51,19 @@ python benchmarks/experiments.py --backend disk        # ~3 min
 
 | Experimento | Resultado |
 |---|---|
-| 1 · Inserción masiva | Heap escribe una página por bloque: 3 068 escrituras para 500 000 filas |
-| 2 · Igualdad (N=100k) | Full Scan 613 lecturas · B+ 4 · Hash 2 |
+| 1 · Inserción masiva | Heap 2,05 s y 3 068 escrituras para 500 000 filas; con árbol B+, 180 s y 511 924 |
+| 2 · Igualdad (N=100k) | Full Scan 613 lecturas · B+ 5 · Hash 2 |
 | 3 · Selectividad | El cruce cae entre 0,1 % (IndexRangeScan, 105) y 1 % (SeqScan, 613) |
 | 4 · Tamaño de bloque | Fan-out 40 / 81 / 163 / 326 registros por página para 1–8 KB |
 
-Los números de índice del Experimento 1 salen del sustituto en memoria, que
-cuesta una escritura por clave; un árbol B+ real con buffer escribirá mucho
-menos. Hay que rehacer esa fila cuando llegue BLK 03.
+El costo de inserción con índice es el hallazgo más fuerte del Experimento 1:
+mantener el árbol B+ multiplica por 88 el tiempo y por 167 las escrituras. La
+causa es que `_write_node` baja el nodo a disco en **cada** inserción; el Heap,
+en cambio, mantiene la página de cola en memoria y escribe una vez por página.
+Si el árbol bufferizara el camino raíz-hoja entre inserciones consecutivas, esa
+diferencia se reduciría mucho — vale la pena decirlo en el informe.
+
+La fila `Hash` sigue saliendo del sustituto en memoria.
 
 ## Suite de conformidad
 
@@ -89,14 +94,38 @@ estar ordenada. Falta el área principal ordenada, el overflow encadenado y la
 reorganización con fill factor 70–80 %. El planificador ya emite
 `SequentialSearch` y `SequentialRangeScan` cuando corresponde.
 
-### 2. Índices en disco — BLK 03 y BLK 04
+### 2. Índices: el árbol B+ ya está conectado; falta el hash dinámico
 
-Mientras el árbol B+ y el hash dinámico no existan, el backend `disk` combina
-tablas en disco con **índices en memoria**, para que las rutas de acceso se
-puedan ejercitar de punta a punta. Los números de índice del Experimento 1
-salen de ese sustituto, no de un árbol real: hay que rehacerlos cuando lleguen.
+`DiskIndexStore` enchufa `BPlusTree` al puerto `IndexManager`, con un archivo
+`.idx` por índice y su propio `DiskManager`, de modo que sus transferencias
+entran en el mismo `DiskCounter` que las de la tabla.
 
-### 3. El servicio HTTP de `storage/` no está en el camino de datos
+El árbol no cubre todos los casos, así que `RoutingIndexStore` decide por índice
+a dónde va y lo deja escrito en `GET /api/tables`:
+
+| Índice | Va a | Por qué |
+|---|---|---|
+| `BTREE` sobre `INT` que es `PRIMARY KEY` | árbol B+ en disco | caso completo |
+| `BTREE` sobre otra columna | sustituto en memoria | el árbol empaqueta claves como `<i` y trata las repetidas como una sola |
+| `HASH` | sustituto en memoria | falta el hashing dinámico (BLK 04) |
+
+Las dos limitaciones del árbol están fijadas como `xfail` estricto en
+`tests/test_contract_bplus.py`: si alguien agrega soporte de duplicados, el test
+falla avisando que ya se puede quitar la marca.
+
+**Para que el árbol cubra los índices secundarios** hacen falta dos cosas:
+claves de más de 4 bytes (hoy `struct` usa `<i`, así que `FLOAT`, `CHAR` y
+`BIGINT` quedan fuera) y claves repetidas. Hoy `_insert_rec` devuelve
+`(None, None)` cuando la clave ya existe, o sea descarta la entrada sin avisar;
+el adaptador lo convierte en error en vez de perder filas en silencio.
+
+### 3. Hashing dinámico — BLK 04
+
+Sin implementar. `CREATE INDEX ... USING HASH` funciona contra el sustituto en
+memoria, así que las rutas de acceso se ejercitan, pero la fila `Hash` del
+Experimento 1 no mide un archivo real.
+
+### 4. El servicio HTTP de `storage/` no está en el camino de datos
 
 `storage/main.py` expone las páginas por HTTP con los registros en base64. Es
 útil para inspeccionar bloques y para la demo, pero el motor **no** lo usa: un
@@ -137,6 +166,6 @@ O solo el motor, en local:
 ```bash
 cd backend/query-engine
 pip install -r requirements-dev.txt
-pytest                                     # 175 pruebas
+pytest                                     # 185 pruebas
 QE_STORAGE_BACKEND=disk python -m queryengine
 ```

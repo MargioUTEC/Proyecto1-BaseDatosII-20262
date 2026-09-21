@@ -17,7 +17,7 @@ cd backend/query-engine
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
 
-pytest                                              # 175 pruebas
+pytest                                              # 185 pruebas
 uvicorn queryengine.api.app:app --reload --port 8001
 ```
 
@@ -296,7 +296,12 @@ el planificador y el ejecutor no se tocan:
 | Backend | Tablas | Índices |
 |---|---|---|
 | `memory` | sustituto en memoria | sustituto en memoria |
-| `disk` | bloques reales de 4 KB vía `storage/` | sustituto en memoria |
+| `disk` | bloques reales vía `storage/` | árbol B+ en disco, con ruteo |
+
+Con el backend `disk` cada índice se envía a la implementación que puede
+servirlo: un `BTREE` sobre una `PRIMARY KEY` entera va al árbol B+ en disco, y
+lo que el árbol no cubre (claves no enteras, claves repetidas, `HASH`) queda en
+el sustituto en memoria. `GET /api/tables` dice dónde quedó cada uno y por qué.
 
 `DiskTableStore` importa `Page`, `DiskManager` y `DiskCounter` desde el módulo
 de almacenamiento y **no reimplementa nada de eso**: aporta solo el nivel de
@@ -338,7 +343,9 @@ queryengine/
     port.py         LOS PUERTOS: contrato con los demás bloques
     memory.py       sustitutos en memoria para desarrollo
     blk01.py        carga el módulo de almacenamiento físico
-    diskstore.py    tablas sobre bloques reales de 4 KB
+    diskstore.py    tablas sobre bloques reales
+    diskindex.py    índices sobre el árbol B+ en disco
+    routing.py      envía cada índice al backend que puede servirlo
     codec.py        tupla <-> bytes, con mapa de nulos
   testing/
     contract.py     suite de conformidad de los puertos
