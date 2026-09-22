@@ -20,11 +20,19 @@ class Page:
       next_page_id: int = -1,
       prev_page_id: int = -1,
       raw_bytes: Optional[bytes] = None,
+      page_size: int = PAGE_SIZE,
   ):
+    """El tamaño de bloque es un parámetro, no una constante.
+
+    El experimento de sensibilidad al tamaño de bloque exige medir con
+    B en [1024, 2048, 4096, 8192], así que cada página recuerda el suyo.
+    Por defecto es PAGE_SIZE, de modo que el código existente no cambia.
+    """
+    self.page_size = page_size
     if raw_bytes:
-      if len(raw_bytes) != PAGE_SIZE:
+      if len(raw_bytes) != page_size:
         raise ValueError(
-            f"El buffer raw_bytes debe tener tamaño {PAGE_SIZE} bytes"
+            f"El buffer raw_bytes debe tener tamaño {page_size} bytes"
         )
       self.data = bytearray(raw_bytes)
       (
@@ -35,12 +43,11 @@ class Page:
           self.prev_page_id,
       ) = struct.unpack_from(PAGE_HEADER_FORMAT, self.data, 0)
     else:
-      self.data = bytearray(PAGE_SIZE)
+      self.data = bytearray(page_size)
       self.page_id = page_id
       self.record_count = 0
-      self.free_space_offset = (
-          PAGE_SIZE  # En slotted-page empieza en el extremo final (4096)
-      )
+      # En slotted-page el espacio libre empieza en el extremo final del bloque
+      self.free_space_offset = page_size
       self.next_page_id = next_page_id
       self.prev_page_id = prev_page_id
       self._sync_header()

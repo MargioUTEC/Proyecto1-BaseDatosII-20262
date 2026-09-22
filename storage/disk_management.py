@@ -19,8 +19,10 @@ class DiskCounter:
 
 class DiskManager:
 
-  def __init__(self, db_path: str):
+  def __init__(self, db_path: str, page_size: int = PAGE_SIZE):
+    """page_size permite variar B sin recompilar el módulo."""
     self.db_path = db_path
+    self.page_size = page_size
     self.counter = DiskCounter()
 
     # Si no existe el archivo binario, se inicializa vacío
@@ -29,8 +31,8 @@ class DiskManager:
         pass
 
   def read_page(self, page_id: int) -> bytes:
-    """Lee 1 bloque de 4096 bytes con seek()"""
-    offset = page_id * PAGE_SIZE
+    """Lee exactamente 1 bloque con seek()"""
+    offset = page_id * self.page_size
 
     if not os.path.exists(self.db_path):
       raise FileNotFoundError(f"Archivo no encontrado: {self.db_path}")
@@ -42,26 +44,26 @@ class DiskManager:
 
     with open(self.db_path, "rb") as f:
       f.seek(offset)
-      raw_bytes = f.read(PAGE_SIZE)
+      raw_bytes = f.read(self.page_size)
 
     # Telemetría obligatoria
     self.counter.disk_reads += 1
 
-    # Asegura bloque exacto de 4096 bytes
-    if len(raw_bytes) < PAGE_SIZE:
-      raw_bytes = raw_bytes.ljust(PAGE_SIZE, b"\x00")
+    # Asegura un bloque de tamaño exacto
+    if len(raw_bytes) < self.page_size:
+      raw_bytes = raw_bytes.ljust(self.page_size, b"\x00")
 
     return raw_bytes
 
   def write_page(self, page_id: int, page_bytes: bytes):
-    """Escribe exactamente 1 bloque de 4096 bytes mediante seek()."""
-    if len(page_bytes) != PAGE_SIZE:
+    """Escribe exactamente 1 bloque mediante seek()."""
+    if len(page_bytes) != self.page_size:
       raise ValueError(
-          f"El bloque debe medir {PAGE_SIZE} bytes (recibido:"
+          f"El bloque debe medir {self.page_size} bytes (recibido:"
           f" {len(page_bytes)})"
       )
 
-    offset = page_id * PAGE_SIZE
+    offset = page_id * self.page_size
 
     # Abre en lectura/escritura binaria
     with open(self.db_path, "r+b") as f:
@@ -74,12 +76,13 @@ class DiskManager:
   def allocate_page(self) -> int:
     """Reserva una nueva página al final del archivo binario y retorna su page_id"""
     file_size = os.path.getsize(self.db_path)
-    new_page_id = file_size // PAGE_SIZE
+    new_page_id = file_size // self.page_size
 
-    # Escribe un bloque inicial de 4096 bytes en ceros
-    empty_block = b"\x00" * PAGE_SIZE
-    with open(self.db_path, "a+b") as f:
-      f.seek(new_page_id * PAGE_SIZE)
+    # Escribe un bloque inicial en ceros. Modo r+b: en a+b el seek se ignora
+    # y toda escritura va al final, lo que oculta errores de offset.
+    empty_block = b"\x00" * self.page_size
+    with open(self.db_path, "r+b") as f:
+      f.seek(new_page_id * self.page_size)
       f.write(empty_block)
       f.flush()
 
@@ -87,4 +90,4 @@ class DiskManager:
     return new_page_id
 
   def get_total_pages(self) -> int:
-    return os.path.getsize(self.db_path) // PAGE_SIZE
+    return os.path.getsize(self.db_path) // self.page_size

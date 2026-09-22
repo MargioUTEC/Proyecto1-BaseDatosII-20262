@@ -1,0 +1,4 @@
+ruta,lecturas_media,lecturas_desv,ms_media,ms_desv
+Full Scan (Heap),613.0,0.0,160.0663,2.7474
+B+ Tree,5.0,0.0,0.1857,0.0082
+Hash,2.0,0.0,0.0549,0.0037

@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+.git/
+backend/query-engine/tests/
+backend/query-engine/data/
+benchmarks/results/
+*.bin
+data/
+*.csv
