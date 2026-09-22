@@ -39,6 +39,17 @@ services:
       - engine-data:/var/lib/cs2042
       - ./data:/data:ro
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: cs2042/frontend:0.1.0
+    container_name: cs2042-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - query-engine
+
 volumes:
   storage-data:
   hashing-data:

@@ -216,10 +216,22 @@ Queda un detalle sin tocar: `SLOT_FORMAT = "<HH"` limita offset y longitud a
 estorba a 4 u 8 KB, y el adaptador rechaza cualquier `PAGE_SIZE` por encima de
 ese límite en vez de corromper la página.
 
+## El cliente web
+
+`frontend/` es estático (sin framework) y lo sirve nginx, que además proxea
+`/api` hacia el motor: cliente y API comparten origen, así que el navegador no
+necesita CORS y la consola funciona igual servida desde cualquier host.
+
+El resaltado del editor no usa un modo SQL genérico: reconoce exactamente el
+vocabulario de `queryengine/sql/tokens.py`, así que una palabra que el parser
+rechazaría se ve apagada mientras se escribe. El panel de telemetría contrasta
+el costo que estimó el planificador contra el que midió el `DiskCounter`, que
+es lo único que este cliente hace y un cliente SQL cualquiera no.
+
 ## Levantar todo
 
 ```bash
-docker compose up --build      # storage en :8000, motor en :8001
+docker compose up --build   # consola en :8080, motor :8001, storage :8000, hash :8002
 ```
 
 O solo el motor, en local:

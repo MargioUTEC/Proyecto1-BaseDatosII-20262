@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Consola SQL · CS2042</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="barra">
+  <div class="marca">
+    <span class="marca-nombre">Consola SQL</span>
+    <span class="marca-sub">CS2042 · motor sobre memoria secundaria</span>
+  </div>
+  <div class="barra-derecha">
+    <div class="enlace" id="enlace" data-estado="conectando">
+      <span class="punto"></span><span id="enlaceTexto">conectando…</span>
+    </div>
+    <button class="icono" id="tema" type="button" title="Cambiar tema" aria-label="Cambiar tema">◐</button>
+  </div>
+</header>
+
+<main class="espacio">
+
+  <!-- 1. EXPLORADOR -->
+  <section class="panel riel" aria-labelledby="tituloTablas">
+    <div class="panel-cab">
+      <h2 id="tituloTablas">Tablas</h2>
+      <button class="icono" id="recargar" type="button" title="Recargar catálogo">↻</button>
+    </div>
+    <div class="panel-cuerpo" id="listaTablas">
+      <p class="vacio-nota">Cargando catálogo…</p>
+    </div>
+  </section>
+
+  <!-- 2. EDITOR -->
+  <section class="panel editor" aria-labelledby="tituloEditor">
+    <div class="panel-cab">
+      <h2 id="tituloEditor">Consulta</h2>
+      <div class="cab-acciones">
+        <select id="recetas" aria-label="Sentencias de ejemplo">
+          <option value="">insertar ejemplo…</option>
+        </select>
+        <button class="btn" id="ejecutar" type="button">
+          Ejecutar <kbd>⌘↵</kbd>
+        </button>
+      </div>
+    </div>
+    <div class="editor-caja">
+      <pre class="pintado" id="pintado" aria-hidden="true"></pre>
+      <textarea id="sql" spellcheck="false" autocomplete="off" autocapitalize="off"
+        aria-label="Editor SQL"></textarea>
+    </div>
+    <p class="aviso" id="aviso" hidden></p>
+  </section>
+
+  <!-- 4. PLAN Y MÉTRICAS -->
+  <section class="panel telemetria" aria-labelledby="tituloPlan">
+    <div class="panel-cab"><h2 id="tituloPlan">Plan y costo</h2></div>
+    <div class="panel-cuerpo">
+
+      <div class="contraste" id="contraste" hidden>
+        <div class="contraste-cab">
+          <span class="etiqueta">Bloques</span>
+          <span class="desvio" id="desvio"></span>
+        </div>
+        <div class="par">
+          <span class="par-nombre">estimado</span>
+          <span class="barra-pista"><span class="barra-relleno est" id="barraEst"></span></span>
+          <span class="par-cifra" id="cifraEst">—</span>
+        </div>
+        <div class="par">
+          <span class="par-nombre">medido</span>
+          <span class="barra-pista"><span class="barra-relleno med" id="barraMed"></span></span>
+          <span class="par-cifra" id="cifraMed">—</span>
+        </div>
+      </div>
+
+      <dl class="cifras" id="cifras">
+        <div class="cifra lectura"><dt>lecturas</dt><dd id="mReads">—</dd></div>
+        <div class="cifra escritura"><dt>escrituras</dt><dd id="mWrites">—</dd></div>
+      </dl>
+
+      <div class="tiempos" id="tiempos">
+        <div class="tiempo"><span>parseo</span><b id="tParse">—</b></div>
+        <div class="tiempo"><span>plan</span><b id="tPlan">—</b></div>
+        <div class="tiempo"><span>ejecución</span><b id="tExec">—</b></div>
+        <div class="tiempo total"><span>total</span><b id="tTotal">—</b></div>
+      </div>
+
+      <div class="plan-bloque">
+        <span class="etiqueta">Ruta de acceso</span>
+        <div id="plan" class="plan"><p class="vacio-nota">Ejecuta una consulta.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. RESULTADOS -->
+  <section class="panel resultados" aria-labelledby="tituloResultados">
+    <div class="panel-cab">
+      <h2 id="tituloResultados">Resultados</h2>
+      <div class="cab-acciones paginador" id="paginador" hidden>
+        <button class="icono" id="prev" type="button" aria-label="Página anterior">‹</button>
+        <span class="pagina" id="pagina">—</span>
+        <button class="icono" id="sig" type="button" aria-label="Página siguiente">›</button>
+      </div>
+    </div>
+    <div class="panel-cuerpo sin-pad" id="salida">
+      <p class="vacio-nota con-pad">Sin resultados todavía.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="pie">
+  <span id="pieEstado">Listo.</span>
+  <span class="pie-der" id="pieCosto"></span>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
