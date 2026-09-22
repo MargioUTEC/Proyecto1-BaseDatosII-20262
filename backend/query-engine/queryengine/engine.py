@@ -183,6 +183,7 @@ class QueryEngine:
         mark = self._io.snapshot()
         started = time.perf_counter()
         report = self._storage.reorganize(schema.name)
+        self._catalog.record_reorganize(schema.name)
         elapsed = _elapsed(started)
         delta = self._io.since(mark)
         return {
@@ -325,7 +326,9 @@ class QueryEngine:
             self._catalog.observe_row(schema.name, schema, record)
             inserted += 1
         self._flush(schema.name)
-        self._catalog.record_insert(schema.name, inserted)
+        self._catalog.record_insert(
+            schema.name, inserted, overflow=schema.storage is StorageKind.SEQUENTIAL
+        )
         if isinstance(plan, InsertPlan):
             plan.row_count = inserted
         return QueryResult(

@@ -116,23 +116,37 @@ def index_range(height: int, rows: int) -> CostEstimate:
     )
 
 
+def _overflow_pages(schema: TableSchema, statistics: Statistics) -> int:
+    """Paginas del area de desbordamiento, que se recorre entera.
+
+    El overflow no esta ordenado, asi que toda busqueda sobre una tabla
+    SEQUENTIAL lo barre completo hasta que se reorganiza. Ignorarlo hacia que
+    el plan prometiera una decena de bloques donde se leian cientos.
+    """
+    if not statistics.overflow_rows:
+        return 0
+    return math.ceil(statistics.overflow_rows / schema.records_per_page)
+
+
 def binary_search(schema: TableSchema, statistics: Statistics, rows: int) -> CostEstimate:
-    pages = schema.page_count(statistics.row_count)
+    ordered = max(0, statistics.row_count - statistics.overflow_rows)
+    pages = schema.page_count(ordered) if ordered else 1
     probes = max(1, math.ceil(math.log2(pages + 1)))
-    blocks = probes + max(1, math.ceil(rows / schema.records_per_page))
-    return CostEstimate(
-        blocks=float(blocks),
-        rows=rows,
-        rationale=f"{probes} sondeos binarios sobre {pages} paginas ordenadas",
-    )
+    overflow = _overflow_pages(schema, statistics)
+    blocks = probes + max(1, math.ceil(rows / schema.records_per_page)) + overflow
+    detalle = f"{probes} sondeos binarios sobre {pages} paginas ordenadas"
+    if overflow:
+        detalle += f" + {overflow} paginas de overflow sin ordenar"
+    return CostEstimate(blocks=float(blocks), rows=rows, rationale=detalle)
 
 
 def sequential_range(schema: TableSchema, statistics: Statistics, rows: int) -> CostEstimate:
-    pages = schema.page_count(statistics.row_count)
+    ordered = max(0, statistics.row_count - statistics.overflow_rows)
+    pages = schema.page_count(ordered) if ordered else 1
     probes = max(1, math.ceil(math.log2(pages + 1)))
     swept = max(1, math.ceil(rows / schema.records_per_page))
-    return CostEstimate(
-        blocks=float(probes + swept),
-        rows=rows,
-        rationale=f"{probes} sondeos binarios + {swept} paginas contiguas",
-    )
+    overflow = _overflow_pages(schema, statistics)
+    detalle = f"{probes} sondeos binarios + {swept} paginas contiguas"
+    if overflow:
+        detalle += f" + {overflow} paginas de overflow sin ordenar"
+    return CostEstimate(blocks=float(probes + swept + overflow), rows=rows, rationale=detalle)

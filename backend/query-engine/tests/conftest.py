@@ -73,10 +73,18 @@ def large(engine):
 
 @pytest.fixture
 def large_sequential(engine):
+    """Una tabla ordenada y ya reorganizada.
+
+    Hasta que se reorganiza, todo lo insertado vive en el area de
+    desbordamiento, que se recorre linealmente; ahi el escaneo completo es
+    genuinamente mas barato y el planificador lo prefiere. Las rutas ordenadas
+    solo se pueden observar sobre un area principal que exista.
+    """
     engine.execute(
         "CREATE TABLE ventas_ord (id INT PRIMARY KEY, region CHAR(12), monto FLOAT) "
         "USING SEQUENTIAL;"
     )
     rows = [f"({i}, 'region-{i % 8}', {i * 1.5})" for i in range(4000)]
     _bulk_insert(engine, "ventas_ord", rows)
+    engine.reorganize("ventas_ord")
     return engine

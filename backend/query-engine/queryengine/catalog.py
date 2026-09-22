@@ -95,6 +95,13 @@ class Statistics:
     """
 
     row_count: int = 0
+    overflow_rows: int = 0
+    """Filas en el area de desbordamiento de una tabla SEQUENTIAL.
+
+    El planificador no toca el disco, asi que necesita saber por el catalogo
+    cuanto hay sin ordenar: el overflow se recorre linealmente y puede dominar
+    el costo de una busqueda hasta que se reorganiza.
+    """
     distinct: dict[str, int] = field(default_factory=dict)
     bounds: dict[str, list] = field(default_factory=dict)
 
@@ -128,6 +135,7 @@ class Statistics:
     def to_dict(self) -> dict:
         return {
             "row_count": self.row_count,
+            "overflow_rows": self.overflow_rows,
             "distinct": dict(self.distinct),
             "bounds": {name: list(pair) for name, pair in self.bounds.items()},
         }
@@ -136,6 +144,7 @@ class Statistics:
     def from_dict(raw: dict) -> Statistics:
         return Statistics(
             row_count=raw.get("row_count", 0),
+            overflow_rows=raw.get("overflow_rows", 0),
             distinct=dict(raw.get("distinct", {})),
             bounds={name: list(pair) for name, pair in raw.get("bounds", {}).items()},
         )
@@ -308,9 +317,16 @@ class Catalog:
     def statistics(self, table: str) -> Statistics:
         return self._stats.setdefault(self.table(table).name.lower(), Statistics())
 
-    def record_insert(self, table: str, rows: int = 1) -> None:
+    def record_insert(self, table: str, rows: int = 1, overflow: bool = False) -> None:
         stats = self.statistics(table)
         stats.row_count += rows
+        if overflow:
+            stats.overflow_rows += rows
+        self._flush()
+
+    def record_reorganize(self, table: str) -> None:
+        """El area de desbordamiento quedo vacia."""
+        self.statistics(table).overflow_rows = 0
         self._flush()
 
     def observe_row(self, table: str, schema: TableSchema, record: tuple) -> None:

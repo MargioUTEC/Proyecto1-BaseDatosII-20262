@@ -70,6 +70,22 @@ def test_sequential_tables_can_binary_search_the_primary_key(large_sequential):
     assert "SequentialSearch" in plan
 
 
+def test_an_unreorganized_table_is_cheaper_to_scan(engine):
+    """Todo en el desbordamiento: la busqueda binaria no tiene donde buscar.
+
+    El area de desbordamiento no esta ordenada y se recorre entera, asi que
+    mientras no se reorganice el escaneo completo cuesta lo mismo y el
+    planificador no se enreda pretendiendo un descenso binario.
+    """
+    engine.execute("CREATE TABLE recien (id INT PRIMARY KEY, x CHAR(8)) USING SEQUENTIAL")
+    values = ", ".join(f"({n}, 'v{n}')" for n in range(3000))
+    engine.execute(f"INSERT INTO recien VALUES {values}")
+    assert "SeqScan" in plan_of(engine, "SELECT * FROM recien WHERE id = 1500")
+
+    engine.reorganize("recien")
+    assert "SequentialSearch" in plan_of(engine, "SELECT * FROM recien WHERE id = 1500")
+
+
 def test_sequential_tables_sweep_a_primary_key_range(large_sequential):
     plan = plan_of(large_sequential, "SELECT * FROM ventas_ord WHERE id >= 1000 AND id <= 1005")
     assert "SequentialRangeScan" in plan

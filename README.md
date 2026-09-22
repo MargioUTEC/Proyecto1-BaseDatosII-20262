@@ -66,6 +66,51 @@ transferidos, y el cliente muestra el costo estimado junto al medido por el
 | `"Index" = 77777` con hash | IndexScan | 2,2 bloques | 2 lecturas · 0,24 ms |
 | `BETWEEN 1 AND 500` con B+ | IndexRangeScan | 511 bloques | 506 lecturas · 14 ms |
 
+## Scripts para probar y demostrar
+
+| Script | Para qué |
+|---|---|
+| `./scripts/smoke.sh` | Comprueba los cuatro servicios y las invariantes; sale con código 1 si algo falla |
+| `./scripts/demo.sh` | Recorrido guiado de diez pasos, con el contraste antes/después de indexar |
+| `./scripts/demo.sh --pausa` | Lo mismo esperando Enter entre pasos, para narrar sobre la grabación |
+| `./scripts/inspect_page.py` | Abre un bloque del archivo binario y muestra cabecera, slots y registros |
+| `scripts/sql/*.sql` | Guiones para pegar en la consola o correr con `python -m queryengine -f` |
+
+### Inspeccionar un bloque en disco
+
+```bash
+export QE_CATALOG_PATH=data/run/catalog.json QE_TABLE_DIR=data/run/tables
+python scripts/inspect_page.py --list
+python scripts/inspect_page.py customers --page 0
+python scripts/inspect_page.py customers --rid 12,3 --hex
+```
+
+Muestra los cinco campos de la cabecera, el directorio de slots con sus
+desplazamientos y longitudes, y los registros decodificados con el esquema. Los
+offsets crecen hacia atrás (3769, 3442, … 172) porque los registros se escriben
+desde el final del bloque: es la arquitectura de página ranurada, vista en el
+archivo real.
+
+Con `docker compose`, los archivos viven dentro del contenedor; para sacarlos:
+
+```bash
+mkdir -p data/run/tables
+docker cp cs2042-query-engine:/var/lib/cs2042/catalog.json data/run/catalog.json
+docker cp cs2042-query-engine:/var/lib/cs2042/tables/. data/run/tables/
+```
+
+### Guion sugerido para el video
+
+1. `./scripts/demo.sh --pausa` — los pasos 4 y 6 son el contraste que importa:
+   la misma consulta pasa de 8 333 lecturas y 400 ms a 2 lecturas y 0,28 ms.
+2. `python scripts/inspect_page.py customers --page 0 --hex` — los datos en
+   bloques binarios, no en un formato de alto nivel.
+3. La consola en <http://localhost:8080> — el panel de costo con el estimado
+   junto al medido, y el desplegable con las sentencias ya escritas.
+4. `scripts/sql/sequential.sql` con el botón **reorganizar**: la búsqueda pasa
+   de 834 lecturas a 10 al fusionar el área de desbordamiento.
+5. `benchmarks/results/RESUMEN.md` — los cuatro experimentos ya corridos.
+
 ## Experimentos
 
 ```bash

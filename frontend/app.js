@@ -152,6 +152,34 @@
         " · pagina de " + tabla.page_size + " bytes";
       ficha.appendChild(cifras);
 
+      if (tabla.storage === "SEQUENTIAL") {
+        var reorg = document.createElement("button");
+        reorg.className = "reorganizar";
+        reorg.type = "button";
+        reorg.textContent = "reorganizar";
+        reorg.title = "Fusiona el area de desbordamiento con la principal";
+        reorg.addEventListener("click", function () {
+          reorg.disabled = true;
+          reorg.textContent = "reorganizando…";
+          pedir("/tables/reorganize", { table: tabla.name }).then(function (datos) {
+            var informe = datos.report, metricas = datos.metrics;
+            $("pieEstado").textContent =
+              informe.records_kept + " registros reescritos, " +
+              informe.records_from_overflow + " rescatados del overflow · " +
+              informe.pages_before + " → " + informe.pages_after + " paginas";
+            $("pieCosto").textContent =
+              metricas.disk_reads + " R · " + metricas.disk_writes + " W · " +
+              ms(metricas.execution_ms);
+            cargarTablas();
+          }).catch(function (error) {
+            mostrarError(error);
+            reorg.disabled = false;
+            reorg.textContent = "reorganizar";
+          });
+        });
+        ficha.appendChild(reorg);
+      }
+
       var columnas = document.createElement("ul");
       columnas.className = "col-lista";
       tabla.columns.forEach(function (columna) {

@@ -18,7 +18,7 @@ import os
 import time
 from dataclasses import dataclass, field
 
-from .catalog import Catalog, TableSchema
+from .catalog import Catalog, StorageKind, TableSchema
 from .errors import CatalogError, QueryEngineError
 from .storage.port import IndexManager, IOCounter, StorageEngine
 
@@ -151,7 +151,11 @@ class BulkLoader:
             observed = report.rows_inserted if column in overflowed else len(values)
             if observed:
                 self._catalog.set_distinct(schema.name, column, observed)
-        self._catalog.record_insert(schema.name, report.rows_inserted)
+        self._catalog.record_insert(
+            schema.name,
+            report.rows_inserted,
+            overflow=schema.storage is StorageKind.SEQUENTIAL,
+        )
         return report
 
     # -- internals ------------------------------------------------------

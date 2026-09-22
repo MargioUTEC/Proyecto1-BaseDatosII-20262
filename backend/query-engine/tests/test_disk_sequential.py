@@ -37,20 +37,43 @@ def ordered(engine):
     return engine
 
 
+@pytest.fixture
+def reorganizada(ordered):
+    """La misma tabla con el desbordamiento ya fusionado en el area principal."""
+    ordered.reorganize("t")
+    return ordered
+
+
 def test_every_row_comes_back(ordered):
     assert ordered.execute("SELECT * FROM t").row_count == 1500
 
 
-def test_point_lookup_uses_a_binary_search(ordered):
-    result = ordered.execute("SELECT nombre FROM t WHERE id = 900")
+def test_point_lookup_uses_a_binary_search(reorganizada):
+    result = reorganizada.execute("SELECT nombre FROM t WHERE id = 900")
     assert "SequentialSearch" in result.plan_text
     assert result.rows == [("n900",)]
 
 
-def test_a_range_sweeps_in_key_order(ordered):
-    result = ordered.execute("SELECT id FROM t WHERE id >= 100 AND id <= 109")
+def test_a_range_sweeps_in_key_order(reorganizada):
+    result = reorganizada.execute("SELECT id FROM t WHERE id >= 100 AND id <= 109")
     assert "SequentialRangeScan" in result.plan_text
     assert [row[0] for row in result.rows] == list(range(100, 110))
+
+
+def test_the_plan_prices_the_overflow_it_will_have_to_sweep(ordered):
+    """Lo estimado y lo medido no deben separarse por un orden de magnitud.
+
+    Antes de contabilizar el desbordamiento el plan prometia una decena de
+    bloques donde se leian cientos, porque el area sin ordenar se recorre
+    entera en cada busqueda.
+    """
+    result = ordered.execute("SELECT nombre FROM t WHERE id = 900")
+    plan = result.plan
+    while "cost" not in plan and plan.get("children"):
+        plan = plan["children"][0]
+    estimado = plan["cost"]["estimated_blocks"]
+    medido = result.metrics.disk_reads
+    assert medido <= estimado * 2.5, f"estimado {estimado}, medido {medido}"
 
 
 def test_reorganize_folds_the_overflow_back(ordered, tmp_path):

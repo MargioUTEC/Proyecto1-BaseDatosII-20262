@@ -200,6 +200,16 @@ select {
   font-family: var(--mono); font-size: 10.5px; color: var(--tinta-2);
   margin-top: 3px; font-variant-numeric: tabular-nums;
 }
+.reorganizar {
+  appearance: none; cursor: pointer;
+  margin-top: 6px;
+  background: none; border: 1px solid var(--linea); border-radius: 3px;
+  color: var(--tinta-2); font-family: var(--mono); font-size: 10px;
+  letter-spacing: .06em; padding: 3px 8px; width: 100%;
+}
+.reorganizar:hover:not(:disabled) { color: var(--tinta); border-color: var(--tinta-3); }
+.reorganizar:disabled { opacity: .5; cursor: progress; }
+
 .col-lista { list-style: none; margin: 7px 0 0; padding: 0; }
 .col-lista li {
   display: flex; justify-content: space-between; gap: 8px;
