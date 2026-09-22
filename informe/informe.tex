@@ -1,0 +1,899 @@
+\documentclass[a4paper,12pt]{article}
+
+% --- PAQUETES PRINCIPALES ---
+\usepackage[utf8]{inputenc}
+\usepackage[spanish,es-tabla]{babel}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{float}
+
+% --- ENLACES ---
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!70!black,
+    citecolor=blue!70!black,
+    urlcolor=blue!70!black
+}
+
+% --- CONFIGURACIÓN DE LISTADOS DE CÓDIGO ---
+\lstset{
+    basicstyle=\ttfamily\footnotesize,
+    keywordstyle=\color{blue!80!black}\bfseries,
+    commentstyle=\color{green!50!black}\itshape,
+    stringstyle=\color{orange!80!black},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    stepnumber=1,
+    numbersep=8pt,
+    backgroundcolor=\color{gray!6},
+    frame=single,
+    rulecolor=\color{gray!30},
+    breaklines=true,
+    showstringspaces=false,
+    tabsize=2,
+    captionpos=b,
+    literate={á}{{\'a}}1 {é}{{\'e}}1 {í}{{\'i}}1 {ó}{{\'o}}1 {ú}{{\'u}}1
+             {ñ}{{\~n}}1 {Á}{{\'A}}1 {É}{{\'E}}1 {Í}{{\'I}}1 {Ó}{{\'O}}1
+             {Ú}{{\'U}}1 {Ñ}{{\~N}}1 {¿}{{?`}}1 {¡}{{!`}}1
+}
+
+% --- ENCABEZADOS Y PIES DE PÁGINA ---
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small Base de Datos II}
+\fancyhead[R]{\small Gestor Multimodal, Entregable 1}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\begin{document}
+
+% ==============================================================================
+% PORTADA
+% ==============================================================================
+\begin{titlepage}
+    \centering
+    \vspace*{0.5cm}
+    \includegraphics[width=7.5cm]{UTEC-Logo.jpg}\par\vspace{0.8cm}
+
+    {\large \textbf{UNIVERSIDAD DE INGENIERÍA Y TECNOLOGÍA}\par}
+    \vspace{0.4cm}
+    {\large Departamento de Ciencia de la Computación\par}
+    \vspace{1.5cm}
+
+    {\large \textbf{BASE DE DATOS II}\par}
+    \vspace{0.5cm}
+
+    {\Huge \textbf{Informe del Entregable 1}\par}
+    \vspace{0.4cm}
+    {\Large \textbf{Proyecto: Gestor de Base de Datos Multimodal}\par}
+    \vspace{0.3cm}
+    {\large \textit{Motor de Almacenamiento en Disco, Indexación y Telemetría de E/S}\par}
+
+    \vspace{1.2cm}
+
+    \begin{minipage}[t]{0.52\textwidth}
+        \textbf{\large Integrantes:}\\[0.3cm]
+        Margiory Alvarado Chavez\\
+        Francisco Calle Ochoa\\
+        Mauricio Gonzalez Kremer\\
+        Nicolás Llerena Silva\\
+        Diana Ñañez Andres
+    \end{minipage}
+    \hfill
+    \begin{minipage}[t]{0.42\textwidth}
+        \textbf{\large Docente:}\\[0.3cm]
+        Mg. Percy Lovon Ramos\\[0.8cm]
+        \textbf{\large Semestre Académico:}\\[0.2cm]
+        2026-2
+    \end{minipage}
+
+    \vfill
+    {\large \textbf{Lima, Perú}\par}
+    {\large Setiembre, 2026\par}
+\end{titlepage}
+
+\pagenumbering{roman}
+\tableofcontents
+\newpage
+
+\pagenumbering{arabic}
+\setcounter{page}{1}
+
+% ==============================================================================
+% SECCIONES DE LOS DEMAS BLOQUES (pendientes de sus autores)
+% ==============================================================================
+
+\section{Introducción y Arquitectura del Sistema}
+% Breve descripción de la arquitectura del gestor, componentes desacoplados
+% (almacenamiento en disco, indexación, motor de consultas y visualización) y
+% objetivos del entregable.
+
+\section{Capa de Almacenamiento Físico}
+\subsection{Layout de Página y Gestión Binaria de Bloques}
+% Tamaño de bloque fijo (B = 4096 / 8192 bytes), manejo de seek()/struct/binario.
+% Estructura del Page Header y tuplas/RID.
+
+\subsection{Instrumentación de E/S (DiskCounter)}
+% Monitor para el registro estricto de disk_reads y disk_writes.
+
+\section{Métodos de Organización de Archivos}
+\subsection{Heap File}
+% Inserción O(1) con Free-List o append, Full Table Scan y eliminación.
+
+\subsection{Sequential File}
+% Estructura dual (Área Principal + Overflow), búsqueda binaria y reorganización.
+
+\section{Capa de Indexación Relacional}
+\subsection{Árbol $B^+$ en Disco}
+
+Para la indexación avanzada, se implementó un Árbol $B^+$ multinivel que opera
+estrictamente sobre memoria secundaria. La estructura fue diseñada para
+parametrizar de forma dinámica la capacidad de los nodos en función del tamaño
+de bloque $B$ indicado por el gestor, optimizando así las transferencias de I/O.
+
+\textbf{Estructura Física de los Nodos:} \\
+Todo nodo interno u hoja inicia con una cabecera de 16 bytes empaquetada
+mediante la librería \texttt{struct} de Python (\texttt{<i i i i>}). Esta
+almacena:
+\begin{itemize}
+    \item \texttt{is\_leaf}: Bandera booleana (entero).
+    \item \texttt{num\_keys}: Cantidad actual de claves activas en el bloque.
+    \item \texttt{next\_leaf} y \texttt{prev\_leaf}: Punteros de encadenamiento
+    doble, fundamentales para habilitar búsquedas por rango puramente
+    secuenciales a nivel de disco.
+\end{itemize}
+
+\textbf{Indexación No Agrupada (RIDs):} \\
+Para evitar la duplicación innecesaria de datos y mantener un alto factor de
+ramificación, los nodos hoja no almacenan los registros completos. En su lugar,
+guardan tuplas de 12 bytes conformadas por \texttt{<Key, Page\_ID, Slot\_ID>}.
+Esto permite que el índice devuelva el Record Identifier (RID) exacto al motor
+de consultas, el cual recupera la tupla final desde el \textit{Heap} o
+\textit{Sequential File}.
+
+\textbf{Operaciones y Costos:}
+\begin{itemize}
+    \item \textbf{Inserción:} Se realiza mediante búsqueda descendente. Al
+    superar el \texttt{MAX\_KEYS} de un bloque, se aplica el algoritmo de
+    división recursiva (\textit{split}) al 50\%, promoviendo la clave separadora
+    hacia el nodo padre y asignando un nuevo bloque contiguo al final del
+    archivo físico.
+    \item \textbf{Búsqueda Puntual:} Limitada estrictamente a la altura del
+    árbol $h = O(\log_M N)$ lecturas a disco, mitigado por el uso del
+    \texttt{DiskCounter} inyectado desde la capa de almacenamiento.
+    \item \textbf{Búsqueda por Rango:} Minimiza severamente el I/O al realizar
+    un único descenso hacia la hoja del límite inferior, y a partir de ahí,
+    itera horizontalmente utilizando el puntero \texttt{next\_leaf}, evitando
+    así múltiples descensos desde la raíz.
+\end{itemize}
+
+\subsection{Hashing Dinámico (Extendible Hashing)}
+% Función hash en disco, directorio/buckets y división ante colisiones.
+
+% ==============================================================================
+% SECCION 5: MOTOR DE CONSULTAS, PARSER SQL Y TELEMETRIA
+% ==============================================================================
+
+\section{Motor de Consultas, Parser SQL y Telemetría}
+
+El motor de consultas es la capa declarativa del gestor. Recibe una sentencia
+SQL, decide por qué camino conviene resolverla y la ejecuta contra las
+estructuras físicas, pero no abre ningún archivo por su cuenta: toda la entrada
+y salida ocurre detrás de dos interfaces que las capas de almacenamiento e
+indexación implementan. Esa separación fue lo que permitió que las cuatro
+partes del proyecto avanzaran en paralelo y se juntaran al final sin reescribir
+nada.
+
+Una sentencia atraviesa cinco fases antes de devolver resultados. El
+\textit{lexer} convierte el texto en tokens, el \textit{parser} arma el árbol
+sintáctico, el \textit{binder} resuelve los nombres contra el catálogo y
+convierte cada literal al tipo real de su columna, el planificador elige la
+ruta de acceso, y el ejecutor recorre el plan pidiendo páginas. El binder es la
+frontera entre lo sintáctico y lo semántico: antes de esa fase la condición
+\texttt{id = '101'} compara un entero contra una cadena de texto, y después ya
+compara dos enteros.
+
+\subsection{Gramática Declarativa y Planificador de Ejecución}
+
+\subsubsection{Analizador léxico y sintáctico}
+
+El analizador léxico está escrito a mano y recorre el texto carácter por
+carácter, llevando la cuenta de la línea y la columna de cada token. Ese detalle
+es lo que permite que un error de escritura vuelva con la posición exacta en
+lugar de un mensaje genérico, y que el editor del cliente web mueva el cursor
+al punto donde el parser se detuvo:
+
+\begin{lstlisting}[caption={Error de sintaxis con posición}]
+SELECT * FORM customers WHERE "Index" = 1;
+
+  se esperaba FROM y se encontro 'FORM' (linea 1, columna 10)
+\end{lstlisting}
+
+El analizador reconoce comentarios de línea y de bloque, cadenas con comillas
+simples duplicadas para escapar, y números enteros o con exponente. También
+acepta identificadores entre comillas dobles, algo que terminó siendo necesario
+por el conjunto de datos que elegimos: la primera columna del archivo se llama
+\texttt{Index}, que es palabra reservada, y varias otras llevan espacios en el
+nombre.
+
+El parser es de descenso recursivo y la precedencia de operadores está
+codificada en el orden de las llamadas, no en una tabla aparte. La disyunción
+llama a la conjunción, esta a la negación y esta última al predicado, de modo
+que \texttt{OR} liga más flojo que \texttt{AND}, y \texttt{AND} más flojo que
+\texttt{NOT}. La gramática soportada cubre lo que pide el enunciado más dos
+extensiones que necesitamos para las pruebas:
+
+\begin{lstlisting}[language=SQL, caption={Sentencias reconocidas por el motor}]
+CREATE TABLE empleados (id INT PRIMARY KEY, nombre CHAR(30), salario FLOAT)
+  USING [HEAP | SEQUENTIAL] WITH (PAGE_SIZE = 8192);
+DROP TABLE empleados;
+
+CREATE INDEX idx_id ON empleados(id) USING [BTREE | HASH];
+DROP INDEX idx_id;
+
+INSERT INTO empleados VALUES (101, 'Ada Lovelace', 5200.0);
+COPY empleados FROM 'empleados.csv' WITH (HEADER, DELIMITER ',');
+
+SELECT * FROM empleados WHERE id = 101;
+SELECT nombre FROM empleados WHERE id >= 100 AND id <= 500 ORDER BY id LIMIT 10;
+SELECT * FROM empleados WHERE salario BETWEEN 5000 AND 9000 AND nombre IS NOT NULL;
+
+DELETE FROM empleados WHERE id = 101;
+EXPLAIN SELECT * FROM empleados WHERE id = 101;
+\end{lstlisting}
+
+La cláusula \texttt{WITH (PAGE\_SIZE = n)} hace que el tamaño de bloque sea una
+propiedad de cada tabla y no una constante del código, que es lo que el
+experimento 4 necesita variar. La sentencia \texttt{COPY} carga un archivo
+delimitado sin pasar por el parser, y la razón es de medición: analizar un
+\texttt{INSERT} con tres mil tuplas cuesta unos 55 milisegundos solo de
+analizador léxico, así que a media millón de filas lo que estaríamos midiendo
+en el experimento de inserción sería la velocidad del parser y no la del disco.
+
+\subsubsection{Sistema de tipos y formato binario}
+
+El motor no tiene un esquema fijo. El formato binario de cada registro se
+deriva de los tipos declarados en el \texttt{CREATE TABLE}, de manera que
+cambiar de conjunto de datos no obliga a tocar código. Cada tipo sabe
+describirse como código de \texttt{struct}, convertir un literal a su valor de
+Python y cuánto espacio ocupa:
+
+\begin{table}[H]
+\centering
+\caption{Correspondencia entre tipos declarados y formato físico}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Declaración} & \textbf{Código struct} & \textbf{Bytes} \\
+\midrule
+\texttt{INT} & \texttt{i} & 4 \\
+\texttt{BIGINT} & \texttt{q} & 8 \\
+\texttt{FLOAT} & \texttt{f} & 4 \\
+\texttt{DOUBLE} & \texttt{d} & 8 \\
+\texttt{BOOL} & \texttt{?} & 1 \\
+\texttt{CHAR(n)}, \texttt{VARCHAR(n)} & \texttt{ns} & n \\
+\texttt{DATE} & \texttt{10s} & 10 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Una tabla de tres columnas declaradas como \texttt{INT PRIMARY KEY},
+\texttt{CHAR(30)} y \texttt{FLOAT} produce el formato \texttt{<i30sf}, que
+ocupa 38 bytes. A ese cuerpo se
+le antepone un mapa de nulos de un bit por columna, redondeado a bytes enteros,
+porque en un registro de ancho fijo no hay otra forma de distinguir el entero
+cero de la ausencia de valor. El cálculo de cuántos registros entran en una
+página toma en cuenta ese mapa y la entrada del directorio de slots, cosa que al
+principio no hacíamos y produjo estimaciones optimistas en cerca de un nueve
+por ciento.
+
+\subsubsection{Selección de la ruta de acceso}
+
+El planificador parte la cláusula \texttt{WHERE} en conjunciones de primer
+nivel y se queda con las que son \textit{sargables}, es decir, las que comparan
+una columna contra una constante. Solo esas pueden acotar la búsqueda; una
+disyunción no, porque basta que se cumpla uno de sus lados para que la fila
+califique, y por eso cualquier \texttt{OR} termina resolviéndose con un escaneo
+completo más un filtro encima.
+
+Las conjunciones sargables sobre la misma columna se pliegan en un solo rango.
+Dos condiciones como \texttt{id >= 100} e \texttt{id <= 500} se convierten en el
+intervalo cerrado $[100, 500]$, y si el rango resulta vacío el planificador lo
+detecta antes de tocar el disco. Sobre ese rango se enumeran las rutas
+disponibles según lo que el catálogo tenga registrado:
+
+\begin{table}[H]
+\centering
+\caption{Reglas de despacho del planificador}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Situación} & \textbf{Ruta elegida} \\
+\midrule
+Igualdad con índice \texttt{HASH} o \texttt{BTREE} & \texttt{IndexScan} \\
+Rango con índice \texttt{BTREE} & \texttt{IndexRangeScan} \\
+Igualdad sobre la clave primaria de una tabla \texttt{SEQUENTIAL} & \texttt{SequentialSearch} \\
+Rango sobre la clave primaria de una tabla \texttt{SEQUENTIAL} & \texttt{SequentialRangeScan} \\
+Cualquier otro caso, incluida toda disyunción & \texttt{SeqScan} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Lo que la ruta ganadora no garantiza se vuelve a verificar en un nodo
+\texttt{Filter} colocado encima, así que el plan devuelve las filas correctas
+gane quien gane. Por ejemplo, en \texttt{WHERE id = 101 AND dept = 'Ventas'} con
+un índice sobre \texttt{id}, el índice resuelve la primera condición y el filtro
+comprueba la segunda sobre las pocas filas que llegaron.
+
+\subsubsection{Modelo analítico de costos}
+
+Todas las rutas se cotizan en bloques transferidos, que es exactamente lo que
+mide el \texttt{DiskCounter}. Elegimos esa unidad para poder poner el costo
+estimado al lado del medido y comparar ambos en la misma escala:
+
+\begin{table}[H]
+\centering
+\caption{Costo estimado de cada ruta, en bloques}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Ruta} & \textbf{Bloques} \\
+\midrule
+\texttt{SeqScan} & $P$ \\
+\texttt{IndexScan} sobre B$^+$ & $h + f$ \\
+\texttt{IndexScan} sobre hash & $1{,}2 + f$ \\
+\texttt{IndexRangeScan} & $h + \lceil f / 64 \rceil + f$ \\
+\texttt{SequentialSearch} & $\lceil \log_2 (P_o + 1) \rceil + 1 + P_d$ \\
+\texttt{SequentialRangeScan} & $\lceil \log_2 (P_o + 1) \rceil + \lceil f / c \rceil + P_d$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+donde $P$ es el número de páginas de la tabla, $h$ la altura del índice, $f$ las
+filas estimadas, $c$ los registros por página, $P_o$ las páginas del área
+ordenada y $P_d$ las del área de desbordamiento.
+
+El término $+f$ de las rutas por índice es una lectura suelta por cada RID que
+se alcanza. Es la hipótesis pesimista de índice no agrupado, y es justamente lo
+que hace que un índice pierda contra el escaneo completo cuando el rango se
+ensancha. Ese cruce no es un defecto del modelo sino el fenómeno que el
+experimento 3 busca exponer, y aparece medido en la sección correspondiente.
+
+La selectividad sale de los valores mínimo y máximo que el catálogo guarda por
+columna numérica, suponiendo distribución uniforme. Es una suposición burda,
+pero es la que hace que un rango angosto prefiera el índice y uno amplio
+prefiera el escaneo. Cuando no hay extremos conocidos el modelo cae a las
+constantes de libro de texto, un tercio para una desigualdad suelta.
+
+Un detalle que nos costó encontrar tiene que ver con el área de desbordamiento.
+Al principio el costo de las rutas ordenadas ignoraba esa área, y como no está
+ordenada hay que recorrerla entera en cada búsqueda. El plan prometía once
+bloques donde se leían ochocientos treinta y cuatro. Lo resolvimos guardando en
+el catálogo cuántas filas esperan sin ordenar, número que el motor incrementa al
+insertar y pone en cero al reorganizar, de manera que planificar sigue sin tocar
+el disco. Con eso el estimado volvió a coincidir con lo medido, y además el
+planificador dejó de preferir una búsqueda binaria sobre un área principal
+vacía, que no ahorraba nada.
+
+\subsubsection{Ejecución y telemetría}
+
+El ejecutor sigue el modelo de iteradores. Cada operador es un generador que
+pide filas a su hijo a medida que las necesita, así que una cláusula
+\texttt{LIMIT} realmente detiene el escaneo de abajo en lugar de materializar
+toda la tabla primero. El único operador que tiene que acumular es el de
+ordenamiento.
+
+Las comparaciones siguen la lógica de tres valores del estándar. Comparar contra
+\texttt{NULL} no da falso sino desconocido, y una fila solo sobrevive al
+\texttt{WHERE} cuando el predicado evalúa a verdadero. Por eso una condición
+como \texttt{dept = 'Ventas'} no devuelve las filas donde \texttt{dept} es nulo,
+y hace falta \texttt{IS NULL} para encontrarlas.
+
+Cada consulta reporta el desglose completo: tiempo de análisis léxico y
+sintáctico, tiempo de planificación, tiempo de ejecución, y los bloques leídos y
+escritos que el contador registró durante toda la sentencia. El contador es una
+sola instancia compartida entre tablas e índices, de modo que las cifras de una
+consulta suman a través de todas las estructuras que tocó. Mantenerlo único fue
+una decisión temprana; con un contador por estructura los números del informe no
+habrían cuadrado.
+
+Una consecuencia de medir con esta precisión es que descubrimos que planificar
+estaba costando entrada y salida. El planificador llamaba al índice para
+preguntarle su altura, y esa llamada descendía el árbol de verdad. Toda consulta
+indexada medía entonces más transferencias que las que su propio plan predecía.
+La altura ahora se calcula al crear o cargar el índice y se guarda; solo se
+recalcula cuando el archivo creció, cosa que se verifica mirando el tamaño del
+archivo, sin mover un bloque.
+
+\subsection{Backend API REST y Cliente Web SQL}
+
+\subsubsection{Interfaz REST}
+
+El motor se expone con FastAPI a través de cuatro rutas:
+
+\begin{table}[H]
+\centering
+\caption{Endpoints del motor de consultas}
+\begin{tabularx}{\textwidth}{@{}llX@{}}
+\toprule
+\textbf{Método} & \textbf{Ruta} & \textbf{Función} \\
+\midrule
+\texttt{POST} & \texttt{/api/query} & Ejecuta una sentencia y devuelve las tuplas junto al plan y las métricas \\
+\texttt{GET} & \texttt{/api/tables} & Lista las tablas con su esquema, formato binario e índices activos \\
+\texttt{POST} & \texttt{/api/tables/load} & Carga masiva de un archivo delimitado \\
+\texttt{POST} & \texttt{/api/tables/reorganize} & Reorganiza el área ordenada de una tabla secuencial \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+La respuesta de una consulta trae las columnas, las filas, el plan como árbol
+anidado para poder dibujarlo, el plan en texto plano para mostrarlo tal cual, y
+el bloque de métricas. Los errores salen como HTTP 400 con una forma estable que
+incluye el tipo de error y, cuando es de sintaxis, la línea y la columna:
+
+\begin{lstlisting}[caption={Respuesta de error}]
+{"error": "se esperaba FROM y se encontro 'FORM' (linea 1, columna 10)",
+ "kind": "SQLSyntaxError", "line": 1, "column": 10}
+\end{lstlisting}
+
+\subsubsection{Cliente web}
+
+El cliente es una página estática sin framework, servida por nginx, que además
+hace de intermediario hacia el motor. Cliente y API comparten origen, así que el
+navegador no necesita permisos de origen cruzado y la consola funciona igual
+servida desde cualquier máquina. La interfaz tiene las cuatro secciones que pide
+el enunciado:
+
+\begin{enumerate}
+    \item \textbf{Explorador de tablas.} Muestra cada tabla con su motor de
+    almacenamiento, filas, páginas, bytes por registro y registros por página,
+    la lista de columnas con sus tipos y la clave primaria marcada, y los
+    índices activos indicando en qué estructura quedó cada uno. Las tablas
+    secuenciales traen además un botón para reorganizar, que informa cuántos
+    registros se rescataron del desbordamiento y cómo cambió el número de
+    páginas.
+
+    \item \textbf{Editor SQL.} Acepta varias líneas y se ejecuta con
+    \texttt{Ctrl+Enter}. El resaltado no usa un modo SQL genérico sino el
+    vocabulario exacto del analizador léxico del motor, de manera que una
+    palabra que el parser rechazaría se ve apagada mientras se escribe. Un
+    desplegable trae las sentencias de la demostración ya escritas, con las
+    comillas dobles que el conjunto de datos exige.
+
+    \item \textbf{Visor de resultados.} Tabla paginada de cien filas por página,
+    con desplazamiento horizontal, la columna de número de fila fijada al
+    margen y los valores nulos marcados como tales para distinguirlos de una
+    cadena vacía.
+
+    \item \textbf{Plan de ejecución y métricas.} Dibuja el árbol del plan con el
+    tipo de cada nodo, la condición que aplica y el costo que el planificador le
+    asignó, y sobre él pone dos barras comparando bloques estimados contra
+    bloques medidos, más el desglose de tiempos.
+\end{enumerate}
+
+Ese último panel es lo que separa esta consola de un cliente SQL cualquiera.
+Poner el costo estimado al lado del medido es lo único que este motor puede
+mostrar y de lo que trata el curso, así que ocupa un panel propio en vez de
+esconderse detrás de un \texttt{EXPLAIN}. En la interfaz el color está reservado
+para la medición: todo lo demás se construye con neutros, y los dos únicos tonos
+cromáticos son ámbar para lecturas y verde azulado para escrituras.
+
+Durante las pruebas en el navegador encontramos tres cosas que arreglar. El
+atributo que oculta el paginador lo pisaba el estilo del contenedor, de modo que
+aparecía aun con una sola página. El mensaje de error repetía la posición porque
+el motor ya la incluye en el texto. Y la columna de número de fila reutilizaba
+el estilo de los valores nulos, lo que la hacía verse en cursiva gris.
+% ==============================================================================
+% SECCION 6: EXPERIMENTACION Y EVALUACION DE RENDIMIENTO
+% ==============================================================================
+
+\section{Experimentación y Evaluación de Rendimiento}
+
+Todas las mediciones de esta sección se obtuvieron contra bloques reales en
+disco, con el arnés incluido en el repositorio:
+
+\begin{lstlisting}[language=bash, caption={Ejecución de los cuatro experimentos}]
+python benchmarks/experiments.py --backend disk
+\end{lstlisting}
+
+El arnés deja un archivo CSV por experimento y un resumen dentro del
+directorio \texttt{benchmarks/\allowbreak results/}. Los tiempos corresponden a una corrida completa de
+unos trece minutos sobre una máquina con disco de estado sólido, y las cifras de
+entrada y salida son las que el \texttt{DiskCounter} registró, no estimaciones.
+
+\subsection{Conjunto de Datos de Prueba}
+
+Usamos el conjunto \textbf{Customers} de
+Datablist\footnote{\url{https://www.datablist.com/learn/csv/download-sample-csv-files\#customers-dataset}},
+que ofrece el mismo esquema en varios tamaños. Trabajamos con los archivos de
+100\,000 y 500\,000 registros, por encima del mínimo que pide el enunciado. Los
+archivos no están versionados porque pesan entre 17 y 83 megabytes; el
+repositorio incluye un script que los descarga.
+
+El esquema tiene doce columnas. Medimos el ancho máximo real de cada una sobre
+el archivo de cien mil registros y declaramos los \texttt{CHAR} con algo de
+margen sobre ese valor:
+
+\begin{table}[H]
+\centering
+\caption{Esquema de la tabla de prueba}
+\begin{tabular}{@{}llrr@{}}
+\toprule
+\textbf{Columna} & \textbf{Tipo declarado} & \textbf{Ancho máximo} & \textbf{Bytes} \\
+\midrule
+\texttt{Index} & \texttt{INT PRIMARY KEY} & 6 & 4 \\
+\texttt{Customer Id} & \texttt{CHAR(15)} & 15 & 15 \\
+\texttt{First Name} & \texttt{CHAR(16)} & 11 & 16 \\
+\texttt{Last Name} & \texttt{CHAR(16)} & 11 & 16 \\
+\texttt{Company} & \texttt{CHAR(40)} & 36 & 40 \\
+\texttt{City} & \texttt{CHAR(28)} & 24 & 28 \\
+\texttt{Country} & \texttt{CHAR(56)} & 51 & 56 \\
+\texttt{Phone 1} & \texttt{CHAR(24)} & 22 & 24 \\
+\texttt{Phone 2} & \texttt{CHAR(24)} & 22 & 24 \\
+\texttt{Email} & \texttt{CHAR(48)} & 44 & 48 \\
+\texttt{Subscription Date} & \texttt{DATE} & 10 & 10 \\
+\texttt{Website} & \texttt{CHAR(44)} & 39 & 44 \\
+\midrule
+\multicolumn{3}{r}{\textbf{Registro completo}} & \textbf{325} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Con el mapa de nulos el registro ocupa 327 bytes en la página, lo que da doce
+registros por bloque de 4\,096 bytes y 8\,334 páginas para cien mil filas. La
+columna \texttt{Index} es entera, única y va de uno a $N$, así que sirve como
+clave primaria y es la que los índices en disco aceptan, porque tanto el árbol
+B$^+$ como el hash extensible empaquetan claves enteras.
+
+Dos particularidades del archivo obligaron a ajustar cosas del motor. La primera
+columna se llama \texttt{Index}, que es palabra reservada de SQL, y otras llevan
+espacios en el nombre, de modo que la tabla se declara con los nombres entre
+comillas dobles. Hacerlo así tiene una ventaja práctica: como los nombres
+coinciden con la cabecera del archivo, la sentencia \texttt{COPY} empareja las
+columnas sola y no hace falta enumerarlas.
+
+Para los experimentos usamos una proyección de cinco columnas del mismo archivo,
+de 102 bytes por registro y treinta y ocho por página, que es la que aparece en
+las tablas que siguen.
+
+\subsection{Experimento 1: Costo de Inserción Masiva}
+
+Cargamos lotes crecientes en cuatro configuraciones: Heap File, Sequential File
+con su reorganización incluida, y Heap File manteniendo un índice, primero
+árbol B$^+$ y después hash extensible.
+
+\begin{table}[H]
+\centering
+\caption{Tiempo de carga en segundos}
+\begin{tabular}{@{}rrrrr@{}}
+\toprule
+\textbf{N} & \textbf{Heap} & \textbf{Sequential} & \textbf{Heap + B$^+$} & \textbf{Heap + Hash} \\
+\midrule
+1\,000 & 0{,}01 & 0{,}02 & 0{,}20 & 0{,}12 \\
+10\,000 & 0{,}10 & 0{,}18 & 2{,}31 & 1{,}10 \\
+50\,000 & 0{,}48 & 0{,}91 & 13{,}66 & 6{,}07 \\
+100\,000 & 0{,}96 & 1{,}82 & 30{,}87 & 12{,}19 \\
+250\,000 & 2{,}39 & 4{,}54 & 89{,}01 & 30{,}39 \\
+500\,000 & 4{,}78 & 9{,}08 & 183{,}82 & 61{,}62 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Bloques escritos durante la carga}
+\begin{tabular}{@{}rrrrr@{}}
+\toprule
+\textbf{N} & \textbf{Heap} & \textbf{Sequential} & \textbf{Heap + B$^+$} & \textbf{Heap + Hash} \\
+\midrule
+1\,000 & 27 & 63 & 1\,043 & 2\,041 \\
+10\,000 & 264 & 622 & 10\,439 & 20\,522 \\
+50\,000 & 1\,316 & 3\,102 & 52\,199 & 102\,344 \\
+100\,000 & 2\,632 & 6\,204 & 104\,402 & 204\,685 \\
+250\,000 & 6\,579 & 15\,508 & 261\,004 & 511\,195 \\
+500\,000 & 13\,158 & 31\,016 & 522\,014 & 1\,023\,922 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+El resultado más claro del experimento es que mantener un índice cuesta más que
+guardar los datos. Para medio millón de registros el Heap File escribe 13\,158
+bloques, uno por página llena, y tarda menos de cinco segundos. Con el árbol
+B$^+$ encima la misma carga tarda treinta y ocho veces más y escribe cuarenta
+veces más bloques.
+
+La explicación está en cómo escribe cada estructura. El Heap mantiene en memoria
+la página que está llenando y solo la baja a disco cuando se llena, así que
+escribe una vez por página. El árbol B$^+$ y el hash, en cambio, escriben su
+nodo o su bucket en cada inserción, sin reutilizar entre llamadas consecutivas
+el camino que acaban de recorrer. Por eso el número de escrituras del árbol es
+aproximadamente una por clave más las divisiones de nodo, y el del hash es
+todavía mayor porque además actualiza su cabecera cada vez.
+
+Esa amplificación nos afectó primero en el propio Heap File. La primera versión
+del adaptador reescribía el bloque completo después de cada registro, lo que
+para veinte mil filas daba 20\,123 escrituras sobre 123 páginas de datos, un
+factor de ciento sesenta y tres. Mantener la página de cola en memoria bajó la
+cifra a 123 escrituras exactas y subió el ritmo de carga de dieciocho mil a
+doscientas sesenta mil filas por segundo. La misma idea aplicada a los índices
+reduciría bastante la diferencia que muestra la tabla.
+
+El Sequential File escribe alrededor del doble que el Heap porque además de
+llenar el área de desbordamiento hay que reorganizar, lo que reescribe el área
+principal ordenada con factor de carga de 0{,}75.
+
+\subsection{Experimento 2: Búsquedas Puntuales de Igualdad}
+
+Ejecutamos mil consultas de igualdad con claves aleatorias sobre una tabla de
+cien mil registros, que ocupa 2\,631 páginas, comparando las cuatro rutas de
+acceso.
+
+\begin{table}[H]
+\centering
+\caption{Mil búsquedas puntuales sobre $N = 100\,000$}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\textbf{Ruta} & \textbf{Lecturas} & \textbf{Desv.} & \textbf{ms} & \textbf{Desv.} \\
+\midrule
+Full Scan (Heap) & 2\,631{,}00 & 0{,}00 & 251{,}050 & 4{,}219 \\
+Búsqueda binaria (Sequential) & 11{,}85 & 1{,}48 & 0{,}799 & 0{,}104 \\
+Árbol B$^+$ & 5{,}00 & 0{,}00 & 0{,}184 & 0{,}009 \\
+Hash extensible & 2{,}00 & 0{,}00 & 0{,}094 & 0{,}005 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Los números siguen lo que predice la teoría. El escaneo completo lee la tabla
+entera siempre, y por eso su desviación es cero y su costo no depende de dónde
+esté la clave. La búsqueda binaria sobre el área ordenada necesita alrededor de
+$\log_2$ del número de páginas, y su desviación de 1{,}48 refleja que algunas
+claves se resuelven un sondeo antes que otras. El árbol B$^+$ gasta cinco
+bloques constantes, que son la página de metadatos más el descenso por tres
+niveles. El hash es el más barato con dos lecturas fijas, porque llega al bucket
+a través de un directorio que vive en memoria y el número de accesos no crece
+con los datos.
+
+La diferencia práctica es de tres órdenes de magnitud: mil trescientas veces
+menos lecturas con el hash que con el escaneo completo, y dos mil seiscientas
+veces menos tiempo. Sobre la tabla completa de doce columnas, que ocupa 8\,334
+páginas, la misma comparación da 8\,333 lecturas y 400 milisegundos contra dos
+lecturas y 0{,}28 milisegundos.
+
+\subsection{Experimento 3: Búsquedas por Rango con Selectividad Variable}
+
+Consultamos rangos que representan el 0{,}1\,\%, 1\,\%, 5\,\%, 10\,\% y 25\,\%
+de las filas, comparando el árbol B$^+$ contra el Sequential File y el escaneo
+completo sobre la misma tabla de cien mil registros.
+
+\begin{table}[H]
+\centering
+\caption{Bloques leídos por selectividad}
+\begin{tabular}{@{}rrrrr@{}}
+\toprule
+\textbf{Selectividad} & \textbf{Filas} & \textbf{Árbol B$^+$} & \textbf{Sequential} & \textbf{Full Scan} \\
+\midrule
+0{,}1\,\% & 100 & 105 & \textbf{17} & 2\,631 \\
+1\,\% & 1\,000 & 1\,010 & \textbf{48} & 2\,631 \\
+5\,\% & 5\,000 & 2\,631 & \textbf{192} & 2\,631 \\
+10\,\% & 10\,000 & 2\,631 & \textbf{371} & 2\,631 \\
+25\,\% & 25\,000 & 2\,631 & \textbf{906} & 2\,631 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Aquí aparecen los dos comportamientos que el experimento busca. El primero es el
+cruce del árbol B$^+$. Hasta el uno por ciento le conviene usar el índice, pero
+a partir del cinco por ciento el planificador deja de elegirlo y vuelve al
+escaneo completo, que es lo que explican las celdas con 2\,631 lecturas. La
+razón es que el índice es secundario y cada RID que alcanza cuesta una lectura
+suelta, así que traer cinco mil filas por esa vía costaría más de cinco mil
+bloques cuando la tabla entera son 2\,631.
+
+El segundo comportamiento es que el Sequential File gana en todas las
+selectividades, incluso en la más angosta. Eso pasa porque está agrupado: sus
+registros viven físicamente ordenados por clave, de manera que un rango son
+páginas contiguas y no hay que ir a buscar cada fila por separado. Leer el
+veinticinco por ciento de la tabla le cuesta 906 bloques, menos de la mitad que
+un escaneo completo, mientras que el índice secundario ya había renunciado
+mucho antes.
+
+La lección es que la elección de la organización física pesa más que la del
+índice cuando las consultas son por rango, y que un índice secundario solo paga
+cuando la selectividad es alta.
+
+\subsection{Experimento 4: Sensibilidad al Tamaño de Bloque}
+
+Repetimos la carga y una búsqueda variando el tamaño de bloque, midiendo el
+factor de ramificación, la altura del árbol B$^+$ y las transferencias totales.
+
+\begin{table}[H]
+\centering
+\caption{Efecto del tamaño de bloque sobre la tabla}
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+\textbf{$B$ (bytes)} & \textbf{Registros por página} & \textbf{Páginas} & \textbf{Lecturas del escaneo} \\
+\midrule
+1\,024 & 9 & 5\,556 & 5\,555 \\
+2\,048 & 19 & 2\,632 & 2\,631 \\
+4\,096 & 38 & 1\,316 & 1\,315 \\
+8\,192 & 77 & 650 & 649 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Efecto del tamaño de bloque sobre el árbol B$^+$ con cien mil claves}
+\begin{tabular}{@{}rrrrr@{}}
+\toprule
+\textbf{$B$} & \textbf{Fan-out hoja} & \textbf{Fan-out interno} & \textbf{Altura $h$} & \textbf{Páginas del índice} \\
+\midrule
+1\,024 & 83 & 125 & 3 & 2\,419 \\
+2\,048 & 169 & 253 & 3 & 1\,187 \\
+4\,096 & 339 & 509 & 3 & 592 \\
+8\,192 & 681 & 1\,021 & 2 & 295 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+El número de registros por página se duplica cada vez que se duplica el bloque,
+y en consecuencia el número de páginas y las lecturas de un escaneo completo se
+reducen a la mitad. La relación no es exactamente de dos porque la cabecera de
+veinte bytes y el directorio de slots pesan proporcionalmente más en un bloque
+chico: con mil veinticuatro bytes la cabecera se lleva casi el dos por ciento
+del bloque, contra un cuarto de por ciento con ocho mil ciento noventa y dos.
+
+En el árbol B$^+$ el efecto es más interesante porque la altura crece de forma
+logarítmica y por lo tanto cambia a saltos. Entre mil veinticuatro y cuatro mil
+noventa y seis bytes la altura se mantiene en tres niveles aunque el fan-out se
+cuadruplica, y solo al llegar a ocho mil ciento noventa y dos baja a dos. Lo que
+sí cambia de forma continua es el tamaño del índice: pasa de 2\,419 páginas a
+295, ocho veces menos espacio para las mismas cien mil claves.
+
+Bloques más grandes reducen las transferencias, pero conviene recordar que cada
+transferencia mueve más bytes. La ventaja es clara cuando las consultas son
+escaneos o rangos, donde todo lo que entra en el bloque se aprovecha, y se
+diluye cuando son búsquedas puntuales que solo necesitan un registro de los
+setenta y siete que trajo la página.
+
+\section{Conclusiones}
+
+El trabajo confirmó que en un gestor sobre memoria secundaria las decisiones que
+importan se miden en bloques transferidos y no en operaciones de memoria. Las
+cuatro rutas de acceso que implementamos resuelven la misma consulta de igualdad
+con costos que van de 2\,631 lecturas a dos, y esa diferencia no se nota en la
+complejidad del código sino en cuántas veces hay que ir al disco.
+
+El resultado que menos esperábamos es el del experimento 1. Dimos por sentado
+que mantener un índice tendría un costo moderado sobre la inserción, y resultó
+ser el factor dominante: cargar medio millón de registros en un Heap File toma
+menos de cinco segundos, y con un árbol B$^+$ encima toma tres minutos. La causa
+no es la estructura sino cuándo se decide bajar una página a disco. Cuando
+corregimos eso en el Heap File, que al principio reescribía el bloque completo
+después de cada registro, las escrituras bajaron de 20\,123 a 123 para las
+mismas veinte mil filas. Los índices siguen sin esa optimización y ahí está la
+mayor parte de la diferencia que muestran las tablas.
+
+El experimento 3 dejó la otra lección. Un índice secundario deja de convenir
+apenas la consulta toca más del uno por ciento de la tabla, porque cada RID que
+alcanza cuesta una lectura suelta, mientras que una organización agrupada como
+el Sequential File gana en todas las selectividades por leer páginas contiguas.
+Dicho de otra forma, para consultas por rango la organización física de la tabla
+pesa más que cualquier índice que se le agregue encima.
+
+Haber construido un modelo de costos en la misma unidad que mide el contador
+resultó más útil de lo previsto, porque convirtió cada discrepancia entre lo
+estimado y lo medido en un indicio de que algo estaba mal. Así encontramos tres
+problemas que de otro modo habrían pasado desapercibidos: que el cálculo de
+registros por página ignoraba el mapa de nulos y el directorio de slots, que
+planificar estaba costando entrada y salida porque el planificador descendía el
+árbol para preguntar su altura, y que el costo de las rutas ordenadas no tomaba
+en cuenta el área de desbordamiento, lo que hacía prometer once bloques donde se
+leían ochocientos treinta y cuatro.
+
+Queda pendiente para el segundo entregable llevar el mismo criterio a los
+índices, empezando por mantener en memoria el camino entre inserciones
+consecutivas, y extender el árbol B$^+$ para aceptar claves no enteras y
+repetidas, que hoy lo limitan a indexar claves primarias.
+
+% ==============================================================================
+% ANEXOS
+% ==============================================================================
+\newpage
+\appendix
+\section{Anexos}
+
+\subsection{Enlaces del Proyecto y Material Complementario}
+
+\begin{itemize}
+    \item \textbf{Repositorio de código (GitHub):} \\
+    \url{https://github.com/MargioUTEC/Proyecto1-BaseDatosII-20262.git} \\
+    \textit{Contiene el código fuente, los scripts de datos y las instrucciones
+    de ejecución en un solo paso en el archivo \texttt{README.md}.}
+
+    \vspace{0.3cm}
+
+    \item \textbf{Video demostrativo:} \\
+    \url{https://youtu.be/enlace-al-video} \\
+    \textit{Incluye la inspección de archivos binarios en disco, la ejecución de
+    consultas en el cliente web con sus métricas de entrada y salida, y la
+    presentación de los resultados del benchmark automatizado.}
+\end{itemize}
+
+\subsection{Instrucciones de despliegue}
+
+El sistema levanta cuatro servicios en un solo paso:
+
+\begin{lstlisting}[language=bash, caption={Ejecución del sistema}]
+git clone https://github.com/MargioUTEC/Proyecto1-BaseDatosII-20262.git
+cd Proyecto1-BaseDatosII-20262
+./scripts/fetch_dataset.sh
+docker compose up --build
+\end{lstlisting}
+
+La consola SQL queda en \texttt{http://localhost:8080} y es el punto de entrada.
+El motor de consultas escucha en el puerto 8001, el servicio de almacenamiento
+físico en el 8000 y el de hashing dinámico en el 8002.
+
+\subsection{Reproducción de los experimentos}
+
+\begin{lstlisting}[language=bash, caption={Arnés de experimentación}]
+python benchmarks/experiments.py --backend disk
+\end{lstlisting}
+
+Deja un archivo CSV por experimento y un resumen en Markdown dentro del
+directorio \texttt{benchmarks/\allowbreak results/}. La opción
+\texttt{-{}-quick} corre los mismos
+cuatro experimentos con volúmenes menores para una verificación rápida.
+
+\subsection{Scripts de verificación e inspección}
+
+\begin{table}[H]
+\centering
+\caption{Utilidades incluidas en el repositorio}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Script} & \textbf{Función} \\
+\midrule
+\texttt{scripts/smoke.sh} & Comprueba los cuatro servicios y las invariantes del motor \\
+\texttt{scripts/demo.sh} & Recorrido guiado de diez pasos, con \texttt{-{}-pausa} para narrar \\
+\texttt{scripts/inspect\_page.py} & Abre un bloque binario y muestra cabecera, slots y registros \\
+\texttt{scripts/sql/} & Guiones SQL para la consola o para el cliente de consola \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+El inspector de páginas permite verificar directamente sobre el archivo que los
+datos residen en bloques binarios. Los desplazamientos del directorio de slots
+crecen hacia atrás porque los registros se escriben desde el final del bloque,
+que es la arquitectura de página ranurada vista en el archivo real:
+
+\begin{lstlisting}[caption={Salida del inspector sobre la primera página}]
+CABECERA DE LA PAGINA 0   (20 bytes)
+  page_id              0
+  record_count         12
+  free_space_offset    172
+  next_page_id         -1
+  prev_page_id         -1
+  espacio libre        104 bytes
+
+DIRECTORIO DE SLOTS   (4 bytes por entrada)
+  slot 0    offset 3769, 327 B
+  slot 1    offset 3442, 327 B
+  slot 2    offset 3115, 327 B
+  ...
+  12 vivos de 12
+
+REGISTROS DECODIFICADOS
+  RID (0, 0)
+      Index                1
+      Customer Id          ffeCAb7AbcB0f07
+      First Name           Jared
+      Country              Eritrea
+\end{lstlisting}
+
+\end{document}
