@@ -84,7 +84,13 @@ class Console:
             print(render_metrics(result))
         return True
 
-    def run_file(self, path: str) -> bool:
+    def run_file(self, path: str, stop_on_error: bool = True) -> bool:
+        """Run a script. Stops at the first failed statement by default.
+
+        Carrying on would leave the rest of the script running against a table
+        that was never populated, printing empty results that read like success
+        while the real error scrolled past.
+        """
         try:
             with open(path, encoding="utf-8") as handle:
                 script = handle.read()
@@ -94,7 +100,11 @@ class Console:
         ok = True
         for statement in _split_statements(script):
             print(f"-- {statement.splitlines()[0][:70]}")
-            ok = self.run_statement(statement) and ok
+            if not self.run_statement(statement):
+                ok = False
+                if stop_on_error:
+                    print("se detuvo en la sentencia anterior", file=sys.stderr)
+                    return False
         return ok
 
     def command(self, line: str) -> bool:
@@ -108,7 +118,7 @@ class Console:
         elif name == "\\d":
             self._describe(argument)
         elif name == "\\i":
-            self.run_file(argument)
+            self.run_file(argument, stop_on_error=False)
         elif name == "\\timing":
             self.timing = not self.timing
             print(f"metricas {'activadas' if self.timing else 'desactivadas'}")
@@ -198,6 +208,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--catalog", default=None, help="ruta del catalogo")
     parser.add_argument("--data-dir", default=None, help="directorio permitido para COPY")
     parser.add_argument("--plan", action="store_true", help="muestra el plan de cada consulta")
+    parser.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help="con -f, sigue con la siguiente sentencia tras un error",
+    )
     parser.add_argument("--no-timing", action="store_true", help="oculta las metricas")
     args = parser.parse_args(argv)
 
@@ -229,7 +244,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.execute:
         return 0 if console.run_statement(args.execute) else 1
     if args.file:
-        return 0 if console.run_file(args.file) else 1
+        return 0 if console.run_file(args.file, not args.continue_on_error) else 1
     console.repl()
     return 0
 
