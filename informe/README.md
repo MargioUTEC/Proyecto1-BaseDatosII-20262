@@ -16,8 +16,8 @@ portada si quieres una prueba rápida.
 
 | Sección | Estado |
 |---|---|
-| 1. Introducción y arquitectura | pendiente |
-| 2. Capa de almacenamiento físico | pendiente |
+| 1. Introducción y arquitectura | escrita |
+| 2. Capa de almacenamiento físico | escrita |
 | 3. Métodos de organización de archivos | pendiente |
 | 4.1 Árbol B+ en disco | escrita |
 | 4.2 Hashing dinámico | pendiente |
@@ -41,3 +41,18 @@ python benchmarks/experiments.py --backend disk
 Las alturas del árbol B+ por tamaño de bloque de la tabla 11 se midieron aparte,
 cargando cien mil claves con cada valor de `PAGE_SIZE` y descendiendo el árbol
 hasta una hoja.
+
+## Sobre las figuras
+
+Los cinco gráficos se dibujan con `pgfplots` dentro del propio documento, no se
+incluyen como imágenes. Así salen vectoriales, usan la tipografía del informe y
+no hay archivos que se desincronicen de los datos.
+
+Cada estructura tiene un color fijo en todas las figuras (el árbol B+ siempre
+ámbar, el Sequential siempre verde azulado), y además cada serie lleva su propio
+marcador, de modo que las figuras se siguen distinguiendo impresas en blanco y
+negro. La paleta se validó para visión con deficiencia cromática.
+
+El experimento 2 usa un gráfico de puntos y no de barras: el eje es logarítmico
+y en una barra el valor lo codifica la longitud, proporción que se pierde al
+comprimir tres órdenes de magnitud.

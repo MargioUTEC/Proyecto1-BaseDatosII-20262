@@ -2,7 +2,9 @@
 
 % --- PAQUETES PRINCIPALES ---
 \usepackage[utf8]{inputenc}
-\usepackage[spanish,es-tabla]{babel}
+% es-noshorthands desactiva los atajos de babel para " . < >, que de otro modo
+% chocan con la sintaxis de TikZ (por ejemplo >=stealth en las flechas).
+\usepackage[spanish,es-tabla,es-noshorthands]{babel}
 \usepackage[margin=2.5cm]{geometry}
 \usepackage{graphicx}
 \usepackage{amsmath,amssymb}
@@ -13,6 +15,47 @@
 \usepackage{hyperref}
 \usepackage{fancyhdr}
 \usepackage{float}
+
+% --- GRAFICOS ---
+% Se dibujan con pgfplots en lugar de incluir imagenes, para que salgan
+% vectoriales y usen la misma tipografia que el resto del documento.
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepgfplotslibrary{groupplots}
+
+% Un color por estructura, el mismo en todas las figuras, de modo que el arbol
+% B+ sea siempre ambar y el Sequential File siempre verde azulado. La paleta se
+% valido para vision con deficiencia cromatica y cada serie lleva ademas su
+% propio marcador, asi que tambien se distingue impresa en blanco y negro.
+\definecolor{cHeap}{HTML}{4A5BC4}
+\definecolor{cSeq}{HTML}{009B84}
+\definecolor{cBtree}{HTML}{B06A12}
+\definecolor{cHash}{HTML}{AE3F62}
+\definecolor{cGrid}{HTML}{D8D5D0}
+\definecolor{cEje}{HTML}{8A857E}
+\definecolor{cNota}{HTML}{5A554E}
+
+\pgfplotsset{
+    figura/.style={
+        width=0.92\linewidth, height=6.4cm,
+        axis line style={cEje, line width=0.4pt},
+        tick align=outside, tick pos=left,
+        grid=both,
+        major grid style={cGrid, line width=0.3pt},
+        minor grid style={cGrid!45, line width=0.2pt},
+        label style={font=\small},
+        tick label style={font=\footnotesize},
+        title style={font=\small\bfseries, align=center},
+        legend cell align=left,
+        legend style={
+            font=\footnotesize, draw=cGrid, line width=0.4pt,
+            fill=white, rounded corners=1pt, inner sep=3pt
+        },
+        every axis plot/.append style={line width=1.1pt, mark size=2.1pt},
+        clip marker paths=true
+    }
+}
+\tikzset{nota/.style={font=\scriptsize, text=cNota, align=left}}
 
 % --- ENLACES ---
 \hypersetup{
@@ -51,6 +94,7 @@
 \fancyhead[R]{\small Gestor Multimodal, Entregable 1}
 \fancyfoot[C]{\thepage}
 \renewcommand{\headrulewidth}{0.4pt}
+\setlength{\headheight}{15pt}
 
 \begin{document}
 
@@ -114,14 +158,48 @@
 % Breve descripción de la arquitectura del gestor, componentes desacoplados
 % (almacenamiento en disco, indexación, motor de consultas y visualización) y
 % objetivos del entregable.
+El presente proyecto consiste en el diseño e implementación desde cero de un mini-gestor de bases de datos construido desde cero sobre memoria secundaria. Los motores de bases de datos modernos desacoplan sus responsabilidades para garantizar mantenibilidad, escalabilidad y un control predecible de los recursos físicos de la máquina.\\
+
+Para lograrlo, el sistema articula cuatro componentes modulares e interconectados: en la base, la capa de almacenamiento físico y organización de archivos gestiona el archivo binario en disco mediante bloques homogéneos de tamaño fijo y estructuras de página; sobre este soporte opera la capa de indexación relacional encargada de implementar estructuras avanzadas multinivel en disco (Árbol $B^+$ y Hashing Dinámico) para optimizar búsquedas puntuales y por rango. Dichos accesos son coordinados por el motor de consultas y planificador (parser SQL) el cual procesa sentencias declarativas (\texttt{CREATE}, \texttt{INSERT}, \texttt{SELECT}) y selecciona la ruta óptima de ejecución (\textit{IndexScan}, \textit{IndexRangeScan} o \textit{SeqScan}). Finalmente, el \textbf{backend API REST y cliente web SQL} expone los servicios de consulta e interactúa con el usuario mediante una interfaz gráfica que visualiza resultados tabulares y reporta la telemetría de entrada/salida en tiempo real.\\
+
+El objetivo principal de este primer entregable es construir y validar el núcleo de almacenamiento de bajo nivel, asegurando transferencias estrictas de bloques y proveyendo la telemetría necesaria para contrastar experimentalmente el rendimiento de las estructuras de datos.
 
 \section{Capa de Almacenamiento Físico}
+
 \subsection{Layout de Página y Gestión Binaria de Bloques}
-% Tamaño de bloque fijo (B = 4096 / 8192 bytes), manejo de seek()/struct/binario.
-% Estructura del Page Header y tuplas/RID.
+
+Para satisfacer las restricciones de hardware y optimizar el rendimiento del subsistema de E/S, la capa de almacenamiento opera sobre archivos binarios estructurados en unidades de transferencia homogéneas de tamaño fijo $B = 4096$ bytes. Se prescinde de utilidades de serialización de alto nivel en memoria (como el módulo \texttt{pickle} de Python) y de operaciones de lectura completa del archivo mediante llamadas globales como \texttt{.read()}. Toda interacción con disco se efectúa desplazando el puntero binario a posiciones calculadas mediante $\text{offset} = \text{page\_id} \times B$ mediante la instrucción \texttt{seek(offset)} y empaquetando tipos mediante el módulo \texttt{struct} en formato binario con codificación \textit{little-endian}.
+
+Cada página física en disco incorpora una arquitectura de Página Ranurada(\textit{Slotted-Page Architecture}) la cual permite almacenar registros manteniendo un direccionamiento indirecto robusto. El layout del bloque se divide internamente en tres segmentos contiguos:
+
+\begin{enumerate}
+    \item \textbf{Cabecera de página (\textit{Page Header}):} Ocupa los primeros 20 bytes de la página estructurados mediante el formato \texttt{<iiiii} de \texttt{struct} (5 enteros con signo de 4 bytes):
+    \begin{itemize}
+        \item \texttt{page\_id}: Identificador único y correlativo del bloque físico en el archivo.
+        \item \texttt{record\_count}: Número actual de tuplas activas alojadas en la página.
+        \item \texttt{free\_space\_offset}: Puntero que señala el inicio del espacio contiguo disponible. Inicialmente se posiciona en el byte 4096 y decrece de manera progresiva hacia el inicio conforme se van insertando registros.
+        \item \texttt{next\_page\_id} / \texttt{prev\_page\_id}: Punteros de encadenamiento bidireccional entre bloques adyacentes para permitir escaneos secuenciales rápidos.
+    \end{itemize}
+    \item \textbf{Directorio de ranuras (\textit{Slot Directory}):} Crece de forma ascendente después del header (a partir del byte 20). Cada slot ocupa 4 bytes (\texttt{<HH}) y almacena el desplazamiento y longitud del registro correspondiente dentro del bloque.
+    \item \textbf{Área de carga útil (\textit{Tuplas}):} Los datos serializados de los registros se escriben desde el final del bloque (byte 4096) hacia el centro. La inserción es aceptada solo si la adición de un nuevo slot ($4$ bytes) más la longitud de la tupla no colisiona con el puntero \texttt{free\_space\_offset}.
+\end{enumerate}
+
+Bajo este esquema, cada tupla es referenciada mediante un id lógico denominado \textbf{Identificador de registro} ($\text{RID}$) definido por el par ordenado:
+\begin{equation}
+    \text{RID} = (\text{page\_id}, \text{slot\_number})
+\end{equation}
+El uso del $\text{RID}$ permite a los índices superiores desacoplar la clave de búsqueda de la posición absoluta de bytes en disco, facilitando la reubicación interna o compactación de datos sin invalidar los punteros de los índices.
 
 \subsection{Instrumentación de E/S (DiskCounter)}
-% Monitor para el registro estricto de disk_reads y disk_writes.
+
+Para medir el costo de cada operación y evaluar el comportamiento asintótico exigido en los experimentos de rendimiento, el gestor incorpora un monitor estricto denominado \texttt{DiskCounter}. Este componente instrumenta las llamadas del gestor físico y registra de manera determinista las siguientes variables de estado:
+
+\begin{itemize}
+    \item \texttt{disk\_reads}: Cantidad acumulada de bloques físicos transferidos desde el almacenamiento secundario hacia la memoria principal mediante la llamada a \texttt{read\_page(page\_id)}.
+    \item \texttt{disk\_writes}: Cantidad acumulada de bloques físicos persistidos hacia el disco mediante \texttt{write\_page(page\_id)} o generados por la asignación de nuevas páginas con \texttt{allocate\_page()}.
+\end{itemize}
+
+El DiskCounter asegura que solo se contabilicen transferencias a nivel de bloque ($4096$ bytes) y no lecturas intermedias o parciales. Asimismo, expone métodos para obtener las métricas por transacción y reiniciar los contadores entre corridas experimentales, lo cual alimenta la telemetría visualizada tanto en los endpoints de la API como en el panel web de métricas.
 
 \section{Métodos de Organización de Archivos}
 \subsection{Heap File}
@@ -600,6 +678,64 @@ con su reorganización incluida, y Heap File manteniendo un índice, primero
 \end{tabular}
 \end{table}
 
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[figura,
+    xmode=log, ymode=log,
+    xlabel={Registros insertados ($N$)},
+    ylabel={Tiempo de carga (s)},
+    xtick={1000,10000,100000,500000},
+    xticklabels={$10^3$,$10^4$,$10^5$,$5{\cdot}10^5$},
+    ytick={0.01,0.1,1,10,100},
+    yticklabels={0{,}01,0{,}1,1,10,100},
+    legend pos=north west,
+]
+\addplot[cHeap,  mark=square*]   coordinates {(1000,0.0104)(10000,0.0973)(50000,0.4832)(100000,0.9627)(250000,2.391)(500000,4.775)};
+\addlegendentry{Heap}
+\addplot[cSeq,   mark=triangle*] coordinates {(1000,0.0189)(10000,0.1811)(50000,0.9056)(100000,1.8226)(250000,4.5442)(500000,9.0784)};
+\addlegendentry{Sequential}
+\addplot[cHash,  mark=diamond*]  coordinates {(1000,0.1161)(10000,1.0975)(50000,6.0682)(100000,12.1914)(250000,30.3932)(500000,61.6204)};
+\addlegendentry{Heap + Hash}
+\addplot[cBtree, mark=*]         coordinates {(1000,0.2022)(10000,2.3062)(50000,13.663)(100000,30.8678)(250000,89.0097)(500000,183.8226)};
+\addlegendentry{Heap + B$^+$}
+\end{axis}
+\end{tikzpicture}
+\caption{Tiempo de carga frente al volumen insertado. Ambos ejes son
+logarítmicos, de modo que una recta indica crecimiento lineal: las cuatro
+configuraciones escalan linealmente y lo que las separa es la constante.}
+\label{fig:e1-tiempo}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[figura,
+    xmode=log, ymode=log,
+    xlabel={Registros insertados ($N$)},
+    ylabel={Bloques escritos},
+    xtick={1000,10000,100000,500000},
+    xticklabels={$10^3$,$10^4$,$10^5$,$5{\cdot}10^5$},
+    ytick={10,100,1000,10000,100000,1000000},
+    yticklabels={10,100,$10^3$,$10^4$,$10^5$,$10^6$},
+    legend pos=north west,
+]
+\addplot[cHeap,  mark=square*]   coordinates {(1000,27)(10000,264)(50000,1316)(100000,2632)(250000,6579)(500000,13158)};
+\addlegendentry{Heap}
+\addplot[cSeq,   mark=triangle*] coordinates {(1000,63)(10000,622)(50000,3102)(100000,6204)(250000,15508)(500000,31016)};
+\addlegendentry{Sequential}
+\addplot[cHash,  mark=diamond*]  coordinates {(1000,2041)(10000,20522)(50000,102344)(100000,204685)(250000,511195)(500000,1023922)};
+\addlegendentry{Heap + Hash}
+\addplot[cBtree, mark=*]         coordinates {(1000,1043)(10000,10439)(50000,52199)(100000,104402)(250000,261004)(500000,522014)};
+\addlegendentry{Heap + B$^+$}
+\end{axis}
+\end{tikzpicture}
+\caption{Bloques escritos durante la carga. La distancia vertical constante
+entre el Heap y las configuraciones con índice es la amplificación de
+escritura: casi dos órdenes de magnitud, y no se cierra al crecer $N$.}
+\label{fig:e1-escrituras}
+\end{figure}
+
 El resultado más claro del experimento es que mantener un índice cuesta más que
 guardar los datos. Para medio millón de registros el Heap File escribe 13\,158
 bloques, uno por página llena, y tarda menos de cinco segundos. Con el árbol
@@ -647,6 +783,41 @@ Hash extensible & 2{,}00 & 0{,}00 & 0{,}094 & 0{,}005 \\
 \end{tabular}
 \end{table}
 
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[figura,
+    % mas angosto que el resto: las etiquetas del eje Y son largas y el ancho
+    % de pgfplots no las incluye
+    width=0.80\linewidth, height=5.2cm,
+    xmode=log,
+    xlabel={Bloques leídos por consulta},
+    xmin=1.2, xmax=11000,
+    xtick={1,10,100,1000,10000},
+    xticklabels={1,10,100,$10^3$,$10^4$},
+    ytick={1,2,3,4},
+    yticklabels={Hash extensible, Árbol B$^+$, Sequential, Full Scan (Heap)},
+    yticklabel style={font=\footnotesize},
+    ymin=0.4, ymax=4.6,
+    grid=major,
+    point meta=explicit symbolic,
+    nodes near coords, nodes near coords align={right},
+    every node near coord/.append style={font=\scriptsize, text=cNota, xshift=2pt},
+]
+\addplot[xcomb, cHash,  line width=0.8pt, mark=*, mark size=2.6pt] coordinates {(2,1)     [2{,}00]};
+\addplot[xcomb, cBtree, line width=0.8pt, mark=*, mark size=2.6pt] coordinates {(5,2)     [5{,}00]};
+\addplot[xcomb, cSeq,   line width=0.8pt, mark=*, mark size=2.6pt] coordinates {(11.85,3) [11{,}85]};
+\addplot[xcomb, cHeap,  line width=0.8pt, mark=*, mark size=2.6pt] coordinates {(2631,4)  [2\,631]};
+\end{axis}
+\end{tikzpicture}
+\caption{Promedio de bloques leídos en mil búsquedas puntuales sobre cien mil
+registros. Se usa un gráfico de puntos y no de barras porque el eje es
+logarítmico: en una barra el valor lo codifica la longitud, y esa proporción se
+pierde al comprimir tres órdenes de magnitud, mientras que la posición del
+punto sigue siendo fiel.}
+\label{fig:e2}
+\end{figure}
+
 Los números siguen lo que predice la teoría. El escaneo completo lee la tabla
 entera siempre, y por eso su desviación es cero y su costo no depende de dónde
 esté la clave. La búsqueda binaria sobre el área ordenada necesita alrededor de
@@ -684,6 +855,45 @@ completo sobre la misma tabla de cien mil registros.
 \bottomrule
 \end{tabular}
 \end{table}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[figura,
+    height=7.6cm,
+    xmode=log, ymode=log,
+    xlabel={Selectividad de la consulta (\% de filas devueltas)},
+    ylabel={Bloques leídos},
+    xtick={0.1,1,5,10,25},
+    xticklabels={0{,}1\%,1\%,5\%,10\%,25\%},
+    ytick={10,100,1000,3000},
+    yticklabels={10,100,$10^3$,$3{\cdot}10^3$},
+    xmin=0.07, xmax=40, ymin=10, ymax=9000,
+    legend pos=south east,
+]
+% La marca del cruce va antes que las series para quedar por debajo de ellas.
+% La nota se aloja en el hueco superior izquierdo, que ninguna serie ocupa.
+\draw[cNota, dotted, line width=0.6pt] (axis cs:5,10) -- (axis cs:5,3400);
+\node[nota, anchor=north west] at (axis cs:0.085,8200)
+  {desde aquí el árbol B$^+$ deja de convenir\\y el plan vuelve al escaneo completo};
+\draw[cNota, line width=0.4pt, ->, >=stealth]
+  (axis cs:1.5,4400) .. controls (axis cs:2.8,4100) .. (axis cs:4.6,3300);
+
+\addplot[cHeap, mark=square*, dashed] coordinates {(0.1,2631)(1,2631)(5,2631)(10,2631)(25,2631)};
+\addlegendentry{Full Scan (Heap)}
+\addplot[cBtree, mark=*] coordinates {(0.1,105)(1,1010)(5,2631)(10,2631)(25,2631)};
+\addlegendentry{Árbol B$^+$}
+\addplot[cSeq, mark=triangle*] coordinates {(0.1,17)(1,48)(5,192)(10,371)(25,906)};
+\addlegendentry{Sequential File}
+\end{axis}
+\end{tikzpicture}
+\caption{Costo de un rango según la fracción de tabla que devuelve. La línea
+punteada es el escaneo completo, que no depende de la selectividad. El árbol
+B$^+$ sube con pendiente cercana a uno porque paga una lectura por cada RID que
+alcanza, y al tocarla deja de convenir. El Sequential File, al estar agrupado,
+se mantiene por debajo en todo el recorrido.}
+\label{fig:e3}
+\end{figure}
 
 Aquí aparecen los dos comportamientos que el experimento busca. El primero es el
 cruce del árbol B$^+$. Hasta el uno por ciento le conviene usar el índice, pero
@@ -739,6 +949,34 @@ factor de ramificación, la altura del árbol B$^+$ y las transferencias totales
 \bottomrule
 \end{tabular}
 \end{table}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[figura,
+    xmode=log, log basis x=2, ymode=log,
+    xlabel={Tamaño de bloque $B$ (bytes)},
+    ylabel={Bloques leídos},
+    xtick={1024,2048,4096,8192},
+    xticklabels={1\,024,2\,048,4\,096,8\,192},
+    xmin=800, xmax=11000,
+    ytick={1,10,100,1000,10000},
+    yticklabels={1,10,100,$10^3$,$10^4$},
+    ymin=1, ymax=20000,
+    legend pos=north east,
+]
+\addplot[cHeap, mark=square*] coordinates {(1024,5555)(2048,2631)(4096,1315)(8192,649)};
+\addlegendentry{Escaneo completo}
+\addplot[cBtree, mark=*] coordinates {(1024,4)(2048,4)(4096,4)(8192,3)};
+\addlegendentry{Búsqueda puntual con B$^+$}
+\end{axis}
+\end{tikzpicture}
+\caption{Efecto del tamaño de bloque sobre dos accesos distintos. Duplicar $B$
+reduce a la mitad el costo de un escaneo completo, porque cada transferencia
+trae el doble de registros. La búsqueda puntual apenas se mueve: solo baja de
+cuatro bloques a tres cuando la altura del árbol cae de tres niveles a dos.}
+\label{fig:e4}
+\end{figure}
 
 El número de registros por página se duplica cada vez que se duplica el bloque,
 y en consecuencia el número de páginas y las lecturas de un escaneo completo se
