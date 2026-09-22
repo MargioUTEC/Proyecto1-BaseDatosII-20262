@@ -49,21 +49,55 @@ Los cuatro experimentos corren sobre disco a la escala que pide el enunciado
 python benchmarks/experiments.py --backend disk        # ~3 min
 ```
 
-| Experimento | Resultado |
+### Experimento 1 — inserción masiva de 500 000 registros
+
+| Estructura | Tiempo | Escrituras |
+|---|---|---|
+| Heap | 4,78 s | 13 158 |
+| Sequential (con reorganización) | 9,08 s | 31 016 |
+| Heap + árbol B+ | 183,82 s | 522 014 |
+| Heap + hash extensible | 61,62 s | 1 023 922 |
+
+El hallazgo: **mantener un índice cuesta más que guardar los datos**. El Heap
+escribe una página por bloque lleno; cada índice, en cambio, baja su nodo o su
+bucket a disco en *cada* inserción. El árbol es 38 veces más lento y el hash
+escribe 78 veces más bloques. Si ambos bufferizaran el camino que acaban de
+recorrer entre inserciones consecutivas, la diferencia se reduciría mucho.
+
+### Experimento 2 — 1 000 búsquedas puntuales sobre N = 100 000
+
+| Ruta | Lecturas (media) | Desviación |
+|---|---|---|
+| Full Scan (Heap) | 2 631 | 0 |
+| Búsqueda binaria (Sequential) | 11,85 | — |
+| Árbol B+ | 5 | 0 |
+| Hash extensible | 2 | 0 |
+
+### Experimento 3 — rangos con selectividad variable
+
+| Selectividad | Árbol B+ | Sequential | Full Scan |
+|---|---|---|---|
+| 0,1 % | 105 | **17** | 2 631 |
+| 1 % | 1 010 | **48** | 2 631 |
+| 5 % | 2 631 (vuelve a SeqScan) | **192** | 2 631 |
+| 10 % | 2 631 (vuelve a SeqScan) | **371** | 2 631 |
+| 25 % | 2 631 (vuelve a SeqScan) | **906** | 2 631 |
+
+El Sequential File gana en todas las selectividades, y la razón es que está
+**agrupado**: sus registros viven físicamente en orden de clave, así que un
+rango son páginas contiguas. El árbol B+ es un índice secundario, y cada RID
+que alcanza cuesta una lectura suelta; pasado el 1 % eso supera el costo de
+leer la tabla entera y el planificador vuelve al escaneo completo — el cruce
+que el experimento busca.
+
+### Experimento 4 — sensibilidad al tamaño de bloque
+
+| B | Registros por página |
 |---|---|
-| 1 · Inserción masiva | Heap 2,05 s y 3 068 escrituras para 500 000 filas; con árbol B+, 180 s y 511 924 |
-| 2 · Igualdad (N=100k) | Full Scan 613 lecturas · B+ 5 · Hash 2 |
-| 3 · Selectividad | El cruce cae entre 0,1 % (IndexRangeScan, 105) y 1 % (SeqScan, 613) |
-| 4 · Tamaño de bloque | Fan-out 40 / 81 / 163 / 326 registros por página para 1–8 KB |
-
-El costo de inserción con índice es el hallazgo más fuerte del Experimento 1:
-mantener el árbol B+ multiplica por 88 el tiempo y por 167 las escrituras. La
-causa es que `_write_node` baja el nodo a disco en **cada** inserción; el Heap,
-en cambio, mantiene la página de cola en memoria y escribe una vez por página.
-Si el árbol bufferizara el camino raíz-hoja entre inserciones consecutivas, esa
-diferencia se reduciría mucho — vale la pena decirlo en el informe.
-
-La fila `Hash` sigue saliendo del sustituto en memoria.
+| 1 024 | 9 |
+| 2 048 | 19 |
+| 4 096 | 38 |
+| 8 192 | 77 |
 
 ## Suite de conformidad
 

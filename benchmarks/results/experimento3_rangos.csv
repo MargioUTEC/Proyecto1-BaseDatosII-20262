@@ -1,6 +1,16 @@
-selectividad,filas,ruta_elegida,lecturas,ms
-0.1%,100,IndexRangeScan,105,2.718
-1.0%,1000,SeqScan,613,210.502
-5.0%,5000,SeqScan,613,206.463
-10.0%,10000,SeqScan,613,209.344
-25.0%,25000,SeqScan,613,213.562
+selectividad,filas,estructura,ruta_elegida,lecturas,ms
+0.1%,100,Arbol B+,IndexRangeScan,105,3.608
+0.1%,100,Sequential,SequentialRangeScan,17,1.191
+0.1%,100,Full Scan,SeqScan,2631,285.185
+1.0%,1000,Arbol B+,IndexRangeScan,1010,21.97
+1.0%,1000,Sequential,SequentialRangeScan,48,3.487
+1.0%,1000,Full Scan,SeqScan,2631,280.398
+5.0%,5000,Arbol B+,SeqScan,2631,289.16
+5.0%,5000,Sequential,SequentialRangeScan,192,14.157
+5.0%,5000,Full Scan,SeqScan,2631,286.354
+10.0%,10000,Arbol B+,SeqScan,2631,291.895
+10.0%,10000,Sequential,SequentialRangeScan,371,27.318
+10.0%,10000,Full Scan,SeqScan,2631,284.597
+25.0%,25000,Arbol B+,SeqScan,2631,290.167
+25.0%,25000,Sequential,SequentialRangeScan,906,67.593
+25.0%,25000,Full Scan,SeqScan,2631,299.867
