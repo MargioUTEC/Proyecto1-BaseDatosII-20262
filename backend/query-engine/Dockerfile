@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/query-engine/queryengine ./queryengine
 COPY storage/*.py ./storage/
+COPY hashing_dinamico/*.py ./hashing_dinamico/
 
 RUN mkdir -p /var/lib/cs2042 /data \
     && useradd --create-home --uid 1000 engine \

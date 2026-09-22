@@ -34,6 +34,7 @@ class PhysicalLayer:
     slot_format: str
     source: str
     BPlusTree: type | None = None
+    ExtendibleHash: type | None = None
     variable_page_size: bool = False
     """True when Page and DiskManager accept a page_size argument.
 
@@ -60,11 +61,16 @@ def load(path: str | None = None) -> PhysicalLayer:
         )
     if directory not in sys.path:
         sys.path.insert(0, directory)
+    # El hashing dinamico vive en su propia carpeta hermana.
+    hashing = os.path.normpath(os.path.join(directory, "..", "hashing_dinamico"))
+    if os.path.isdir(hashing) and hashing not in sys.path:
+        sys.path.append(hashing)
     try:
         config = importlib.import_module("config")
         page_module = importlib.import_module("page")
         disk_module = importlib.import_module("disk_management")
         tree_module = _optional("bplus_tree")
+        hash_module = _optional("extendible_hash")
     except ImportError as exc:
         raise StorageUnavailableError(
             f"el modulo de almacenamiento en '{directory}' no se pudo importar: {exc}"
@@ -89,6 +95,9 @@ def load(path: str | None = None) -> PhysicalLayer:
         slot_format=page_module.SLOT_FORMAT,
         source=directory,
         BPlusTree=getattr(tree_module, "BPlusTree", None) if tree_module else None,
+        ExtendibleHash=(
+            getattr(hash_module, "ExtendibleHashFile", None) if hash_module else None
+        ),
         variable_page_size=_accepts_page_size(page_module.Page)
         and _accepts_page_size(disk_module.DiskManager),
     )

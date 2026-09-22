@@ -78,19 +78,27 @@ def build_engine(settings: Settings | None = None) -> QueryEngine:
 
 
 def _index_backend(io: IOCounter, settings: Settings, layer):
-    """The on-disk B+ tree when the module ships one, with memory behind it.
+    """Whatever on-disk index structures the module ships, with memory behind.
 
-    Indexes the tree cannot serve -- hash, non-integer keys, repeated keys --
-    are routed to the in-memory stand-in so they still work.
+    An index none of them can serve -- a non-integer key, a repeated key on the
+    tree -- falls back to the in-memory stand-in so it still works.
     """
-    if layer.BPlusTree is None:
-        return MemoryIndexStore(io)
-    from .storage.diskindex import DiskIndexStore
     from .storage.routing import RoutingIndexStore
 
-    return RoutingIndexStore(
-        DiskIndexStore(io, settings.table_dir, layer), MemoryIndexStore(io), io
-    )
+    candidates = []
+    if layer.BPlusTree is not None:
+        from .storage.diskindex import DiskIndexStore
+
+        candidates.append(("arbol B+ en disco", DiskIndexStore(io, settings.table_dir, layer)))
+    if layer.ExtendibleHash is not None:
+        from .storage.diskhash import DiskHashIndex
+
+        candidates.append(
+            ("hash extensible en disco", DiskHashIndex(io, settings.table_dir, layer))
+        )
+    if not candidates:
+        return MemoryIndexStore(io)
+    return RoutingIndexStore(candidates, MemoryIndexStore(io), io)
 
 
 def _reopen_existing_tables(engine: QueryEngine, storage) -> None:

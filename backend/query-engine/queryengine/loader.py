@@ -118,8 +118,9 @@ class BulkLoader:
                         report.rejects.append(f"linea {line_number}: {exc}")
                     elif report.rows_rejected > max_rejects * 4:
                         raise CatalogError(
-                            f"{report.rows_rejected} filas rechazadas en '{path}'; "
-                            "revisa el delimitador, la cabecera y los tipos declarados"
+                            f"{report.rows_rejected} filas rechazadas en '{path}'. "
+                            f"La primera fue {report.rejects[0]}. "
+                            f"Columnas del archivo emparejadas: {self._matched(schema, targets)}"
                         ) from exc
                     continue
 
@@ -154,6 +155,15 @@ class BulkLoader:
         return report
 
     # -- internals ------------------------------------------------------
+
+    @staticmethod
+    def _matched(schema: TableSchema, targets: list[int | None]) -> str:
+        """Which columns the header actually fed, for a diagnosable error."""
+        filled = {schema.columns[position].name for position in targets if position is not None}
+        missing = [column.name for column in schema.columns if column.name not in filled]
+        if not missing:
+            return "todas"
+        return f"todas menos {', '.join(missing)}"
 
     def _resolve(self, path: str) -> str:
         candidate = os.path.abspath(os.path.join(self._data_dir or "", path))

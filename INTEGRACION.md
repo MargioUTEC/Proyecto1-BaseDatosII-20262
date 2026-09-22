@@ -11,7 +11,7 @@ El motor no abre archivos. Depende de dos protocolos declarados en
 | Puerto | Qué resuelve | Implementación actual |
 |---|---|---|
 | `StorageEngine` | tablas: insert, fetch, scan, delete, reorganize | `DiskTableStore` sobre `Page` + `DiskManager` |
-| `IndexManager` | índices: search, range_search, height | `DiskIndexStore` sobre `BPlusTree`, con ruteo |
+| `IndexManager` | índices: search, range_search, height | `DiskIndexStore` (B+) y `DiskHashIndex` (hash), con ruteo |
 
 `DiskTableStore` (`storage/diskstore.py`) enchufa la capa física existente contra
 el primer puerto. **Usa `Page`, `DiskManager` y `DiskCounter` tal como están**,
@@ -86,7 +86,36 @@ Para índices están `IndexManagerContract` (hash) y `RangeIndexContract` (B+).
 
 ## Lo que falta
 
-### 1. Sequential File — BLK 02
+### 1. `heap_file.py` y `sequential_file.py` traen el esquema fijo
+
+Ambos declaran
+
+```python
+RECORD_FORMAT = "<i 30s 20s f i i"   # id, nombre, dept, salario
+```
+
+o sea solo almacenan esa tabla de empleados. El dataset que elegimos
+(`customers`, con 12 columnas de texto y una fecha) no cabe ahí, y tampoco
+cabría ningún otro: el motor deriva el formato binario del `CREATE TABLE`, que
+es lo que lo hace independiente del dataset.
+
+Por eso el área ordenada está implementada de forma genérica en
+`DiskTableStore`, sobre la misma página física de `storage/page.py`:
+
+- **Área principal**: un `.bin` con los registros ordenados por clave primaria,
+  recorrido con descenso binario sobre las páginas.
+- **Área de desbordamiento**: un `.ovf` aparte al que van las inserciones
+  nuevas; se recorre linealmente y se fusiona al reorganizar. Sus páginas se
+  direccionan con `page_id` negativo, así un RID sigue nombrando un solo
+  registro sin necesitar un tercer campo.
+- **`reorganize()`**: mezcla ambas áreas, reescribe la principal en orden con
+  fill factor 0,75 y vacía el overflow.
+
+`storage/sequential_file.py` queda como entregable propio del bloque; para que
+el motor lo use tendría que derivar el formato del registro del esquema en vez
+de tenerlo escrito.
+
+### 2. Nada más bloquea
 
 `search_key`, `range_key` y `reorganize` todavía no tienen implementación en
 disco, así que una tabla `USING SEQUENTIAL` reporta el hueco en vez de fingir
@@ -94,7 +123,7 @@ estar ordenada. Falta el área principal ordenada, el overflow encadenado y la
 reorganización con fill factor 70–80 %. El planificador ya emite
 `SequentialSearch` y `SequentialRangeScan` cuando corresponde.
 
-### 2. Índices: el árbol B+ ya está conectado; falta el hash dinámico
+### Índices: árbol B+ y hash extensible, ambos en disco
 
 `DiskIndexStore` enchufa `BPlusTree` al puerto `IndexManager`, con un archivo
 `.idx` por índice y su propio `DiskManager`, de modo que sus transferencias
@@ -106,8 +135,12 @@ a dónde va y lo deja escrito en `GET /api/tables`:
 | Índice | Va a | Por qué |
 |---|---|---|
 | `BTREE` sobre `INT` que es `PRIMARY KEY` | árbol B+ en disco | caso completo |
+| `HASH` sobre `INT` o `BIGINT` | hash extensible en disco | maneja claves repetidas |
 | `BTREE` sobre otra columna | sustituto en memoria | el árbol empaqueta claves como `<i` y trata las repetidas como una sola |
-| `HASH` | sustituto en memoria | falta el hashing dinámico (BLK 04) |
+| cualquiera sobre columna no entera | sustituto en memoria | ambas estructuras indexan enteros |
+
+El hash extensible pasa el contrato de índices **completo**, duplicados
+incluidos. El árbol B+ pasa 8 de 10.
 
 Las dos limitaciones del árbol están fijadas como `xfail` estricto en
 `tests/test_contract_bplus.py`: si alguien agrega soporte de duplicados, el test
@@ -119,13 +152,7 @@ claves de más de 4 bytes (hoy `struct` usa `<i`, así que `FLOAT`, `CHAR` y
 `(None, None)` cuando la clave ya existe, o sea descarta la entrada sin avisar;
 el adaptador lo convierte en error en vez de perder filas en silencio.
 
-### 3. Hashing dinámico — BLK 04
-
-Sin implementar. `CREATE INDEX ... USING HASH` funciona contra el sustituto en
-memoria, así que las rutas de acceso se ejercitan, pero la fila `Hash` del
-Experimento 1 no mide un archivo real.
-
-### 4. El servicio HTTP de `storage/` no está en el camino de datos
+### El servicio HTTP de `storage/` no está en el camino de datos
 
 `storage/main.py` expone las páginas por HTTP con los registros en base64. Es
 útil para inspeccionar bloques y para la demo, pero el motor **no** lo usa: un

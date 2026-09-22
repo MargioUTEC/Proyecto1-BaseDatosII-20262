@@ -10,6 +10,17 @@ services:
     volumes:
       - storage-data:/data
 
+  hashing:
+    build:
+      context: ./hashing_dinamico
+      dockerfile: Dockerfile
+    image: cs2042/hashing:0.1.0
+    container_name: cs2042-hashing
+    ports:
+      - "8002:8001"   # su servicio escucha en 8001, que aqui ya usa el motor
+    volumes:
+      - hashing-data:/app/data
+
   query-engine:
     build:
       context: .
@@ -30,4 +41,5 @@ services:
 
 volumes:
   storage-data:
+  hashing-data:
   engine-data:

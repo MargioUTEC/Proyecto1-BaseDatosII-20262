@@ -36,7 +36,13 @@ PAGE_SIZES = [1024, 2048, 4096, 8192]
 POINT_QUERIES = 1_000
 SEED = 2026
 
-SCHEMA = "(id INT PRIMARY KEY, zona CHAR(12), monto FLOAT)"
+# Esquema recortado del dataset de customers de Datablist: se toman las
+# columnas que los experimentos necesitan y se ignora el resto del archivo.
+SCHEMA = (
+    "(id INT PRIMARY KEY, customerid CHAR(15), nombre CHAR(16), "
+    "pais CHAR(56), alta DATE)"
+)
+DATASET_DIR = os.path.join(ROOT, "data")
 
 
 class Harness:
@@ -63,17 +69,66 @@ class Harness:
         )
 
     def dataset(self, rows: int) -> str:
-        """A CSV of `rows` records, reused across runs of the same size."""
+        """A CSV of `rows` records, cut from the customers dataset.
+
+        The real file is used when it is in ``data/``; otherwise a synthetic one
+        of the same shape is generated, so the harness runs anywhere.
+        """
         path = os.path.join(self.workspace, f"data_{rows}.csv")
         if os.path.exists(path):
             return path
-        rng = random.Random(SEED)
-        with open(path, "w", newline="", encoding="utf-8") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(["id", "zona", "monto"])
-            for number in range(rows):
-                writer.writerow([number, f"zona-{number % 14}", round(rng.uniform(3, 180), 2)])
+        source = self._source_file(rows)
+        if source is not None:
+            self._cut(source, path, rows)
+        else:
+            self._synthesise(path, rows)
         return path
+
+    @staticmethod
+    def _source_file(rows: int) -> str | None:
+        for size in (100_000, 500_000, 1_000_000, 2_000_000):
+            if size < rows:
+                continue
+            candidate = os.path.join(DATASET_DIR, f"customers-{size}.csv")
+            if os.path.exists(candidate):
+                return candidate
+        return None
+
+    @staticmethod
+    def _cut(source: str, target: str, rows: int) -> None:
+        """Take the first `rows` records, keeping only the columns in SCHEMA.
+
+        Source columns: Index, Customer Id, First Name, Last Name, Company,
+        City, Country, Phone 1, Phone 2, Email, Subscription Date, Website.
+        """
+        with open(source, newline="", encoding="utf-8") as src:
+            reader = csv.reader(src)
+            next(reader)
+            with open(target, "w", newline="", encoding="utf-8") as dst:
+                writer = csv.writer(dst)
+                writer.writerow(["id", "customerid", "nombre", "pais", "alta"])
+                for count, row in enumerate(reader):
+                    if count >= rows:
+                        break
+                    writer.writerow([row[0], row[1], row[2], row[6], row[10]])
+
+    @staticmethod
+    def _synthesise(target: str, rows: int) -> None:
+        rng = random.Random(SEED)
+        countries = ["Peru", "Chile", "Eritrea", "Botswana", "Japan", "Malta"]
+        with open(target, "w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["id", "customerid", "nombre", "pais", "alta"])
+            for number in range(1, rows + 1):
+                writer.writerow(
+                    [
+                        number,
+                        f"cust{number:011d}",
+                        f"nombre{number % 997}",
+                        rng.choice(countries),
+                        "2021-05-14",
+                    ]
+                )
 
     def write_csv(self, name: str, header: list[str], rows: list[list]) -> str:
         path = os.path.join(self.out_dir, name)
@@ -99,6 +154,7 @@ def insertion_cost(harness: Harness, sizes: list[int]) -> None:
     rows: list[list] = []
     variants = [
         ("Heap", "HEAP", None),
+        ("Sequential", "SEQUENTIAL", None),
         ("Heap + B+", "HEAP", "BTREE"),
         ("Heap + Hash", "HEAP", "HASH"),
     ]
@@ -111,7 +167,13 @@ def insertion_cost(harness: Harness, sizes: list[int]) -> None:
                 engine.execute(f"CREATE INDEX ix ON t(id) USING {index}")
             started = time.perf_counter()
             report = engine.load("t", os.path.basename(source))
+            writes, reads = report.disk_writes, report.disk_reads
+            if storage == "SEQUENTIAL":
+                folded = engine.reorganize("t")["metrics"]
+                writes += folded["disk_writes"]
+                reads += folded["disk_reads"]
             elapsed = time.perf_counter() - started
+            report.disk_writes, report.disk_reads = writes, reads
             rows.append(
                 [
                     size,
@@ -137,10 +199,18 @@ def point_lookups(harness: Harness, size: int, queries: int) -> None:
     rng = random.Random(SEED)
     keys = [rng.randrange(size) for _ in range(queries)]
 
-    for label, index in [("Full Scan (Heap)", None), ("B+ Tree", "BTREE"), ("Hash", "HASH")]:
+    paths = [
+        ("Full Scan (Heap)", "HEAP", None),
+        ("Busqueda binaria (Sequential)", "SEQUENTIAL", None),
+        ("B+ Tree", "HEAP", "BTREE"),
+        ("Hash", "HEAP", "HASH"),
+    ]
+    for label, storage, index in paths:
         engine = harness.engine(f"e2_{label}")
-        engine.execute(f"CREATE TABLE t {SCHEMA} USING HEAP")
+        engine.execute(f"CREATE TABLE t {SCHEMA} USING {storage}")
         engine.load("t", os.path.basename(source))
+        if storage == "SEQUENTIAL":
+            engine.reorganize("t")
         if index:
             engine.execute(f"CREATE INDEX ix ON t(id) USING {index}")
         reads, latencies = [], []
@@ -170,29 +240,48 @@ def point_lookups(harness: Harness, size: int, queries: int) -> None:
 
 
 def range_selectivity(harness: Harness, size: int) -> None:
-    header = ["selectividad", "filas", "ruta_elegida", "lecturas", "ms"]
+    header = ["selectividad", "filas", "estructura", "ruta_elegida", "lecturas", "ms"]
     rows: list[list] = []
     source = harness.dataset(size)
-    engine = harness.engine("e3")
-    engine.execute(f"CREATE TABLE t {SCHEMA} USING HEAP")
-    engine.load("t", os.path.basename(source))
-    engine.execute("CREATE INDEX ix ON t(id) USING BTREE")
+
+    engines = {}
+    for label, storage, index in [
+        ("Arbol B+", "HEAP", "BTREE"),
+        ("Sequential", "SEQUENTIAL", None),
+        ("Full Scan", "HEAP", None),
+    ]:
+        engine = harness.engine(f"e3_{label}")
+        engine.execute(f"CREATE TABLE t {SCHEMA} USING {storage}")
+        engine.load("t", os.path.basename(source))
+        if storage == "SEQUENTIAL":
+            engine.reorganize("t")
+        if index:
+            engine.execute(f"CREATE INDEX ix ON t(id) USING {index}")
+        engines[label] = engine
 
     for fraction in SELECTIVITIES:
         span = max(1, int(size * fraction))
-        low = (size - span) // 2
-        result = engine.execute(f"SELECT id FROM t WHERE id >= {low} AND id <= {low + span - 1}")
-        node = result.plan_text.strip().splitlines()[-1].split("(")[0].replace("->", "").strip()
-        rows.append(
-            [
-                f"{fraction:.1%}",
-                result.row_count,
-                node,
-                result.metrics.disk_reads,
-                round(result.metrics.total_ms, 3),
-            ]
-        )
-        print(f"  E3 {fraction:>6.1%}  {node:<20} {result.metrics.disk_reads:>7} lecturas")
+        low = max(1, (size - span) // 2)
+        query = f"SELECT id FROM t WHERE id >= {low} AND id <= {low + span - 1}"
+        for label, engine in engines.items():
+            result = engine.execute(query)
+            node = (
+                result.plan_text.strip().splitlines()[-1].split("(")[0].replace("->", "").strip()
+            )
+            rows.append(
+                [
+                    f"{fraction:.1%}",
+                    result.row_count,
+                    label,
+                    node,
+                    result.metrics.disk_reads,
+                    round(result.metrics.total_ms, 3),
+                ]
+            )
+            print(
+                f"  E3 {fraction:>6.1%} {label:<11} {node:<20} "
+                f"{result.metrics.disk_reads:>7} lecturas"
+            )
     harness.write_csv("experimento3_rangos.csv", header, rows)
     harness.section(
         f"Experimento 3 — Rangos con selectividad variable (N={size})", header, rows
@@ -242,7 +331,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Experimentos del informe CS2042")
     parser.add_argument("--backend", default="memory", choices=["memory", "disk"])
     parser.add_argument("--out", default=os.path.join(ROOT, "benchmarks", "results"))
-    parser.add_argument("--quick", action="store_true", help="N mas pequeno, para una corrida rapida")
+    parser.add_argument(
+        "--quick", action="store_true", help="N mas pequeno, para una corrida rapida"
+    )
     parser.add_argument("--only", type=int, choices=[1, 2, 3, 4], action="append")
     args = parser.parse_args(argv)
 

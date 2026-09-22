@@ -17,7 +17,7 @@ cd backend/query-engine
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
 
-pytest                                              # 185 pruebas
+pytest                                              # 202 pruebas
 uvicorn queryengine.api.app:app --reload --port 8001
 ```
 
@@ -142,13 +142,14 @@ La selectividad sale de los mínimos y máximos que el catálogo mantiene por
 columna numérica, asumiendo distribución uniforme. Sin esos extremos cae a las
 constantes de libro (1/3 para una desigualdad).
 
-Medición real sobre 3 000 filas en 19 páginas:
+Medición sobre el dataset real, 100 000 clientes en 8 334 páginas de 4 KB:
 
 ```
-SELECT * FROM viajes WHERE id = 2500;
+SELECT idx, firstname, lastname, email FROM customers WHERE idx = 77777;
 
-sin índice   -> SeqScan                        estimado ~19 bloques   medido 19 lecturas
-con BTREE    -> IndexScan (h=3)                estimado  ~3 bloques   medido  3 lecturas
+sin índice         -> SeqScan          estimado 8334 bloques   medido 8334 lecturas   492 ms
+con hash           -> IndexScan        estimado  2.2 bloques   medido    2 lecturas  0.24 ms
+BETWEEN 5000/5004  -> IndexRangeScan   estimado    9 bloques   medido    9 lecturas  0.33 ms
 ```
 
 ---
@@ -296,12 +297,18 @@ el planificador y el ejecutor no se tocan:
 | Backend | Tablas | Índices |
 |---|---|---|
 | `memory` | sustituto en memoria | sustituto en memoria |
-| `disk` | bloques reales vía `storage/` | árbol B+ en disco, con ruteo |
+| `disk` | bloques reales vía `storage/` | árbol B+ y hash extensible en disco |
 
 Con el backend `disk` cada índice se envía a la implementación que puede
-servirlo: un `BTREE` sobre una `PRIMARY KEY` entera va al árbol B+ en disco, y
-lo que el árbol no cubre (claves no enteras, claves repetidas, `HASH`) queda en
-el sustituto en memoria. `GET /api/tables` dice dónde quedó cada uno y por qué.
+servirlo: un `BTREE` sobre una `PRIMARY KEY` entera va al árbol B+, un `HASH`
+sobre entero al hash extensible, y lo que ninguno cubre (claves no enteras,
+claves repetidas en el árbol) queda en el sustituto en memoria.
+`GET /api/tables` dice dónde quedó cada uno y por qué.
+
+Una tabla `USING SEQUENTIAL` mantiene dos archivos: `<tabla>.bin` con los
+registros ordenados por clave primaria, recorrido con descenso binario, y
+`<tabla>.ovf` con las inserciones posteriores. `POST /api/tables/reorganize`
+mezcla ambos y reescribe el principal con fill factor 0,75.
 
 `DiskTableStore` importa `Page`, `DiskManager` y `DiskCounter` desde el módulo
 de almacenamiento y **no reimplementa nada de eso**: aporta solo el nivel de
@@ -343,8 +350,9 @@ queryengine/
     port.py         LOS PUERTOS: contrato con los demás bloques
     memory.py       sustitutos en memoria para desarrollo
     blk01.py        carga el módulo de almacenamiento físico
-    diskstore.py    tablas sobre bloques reales
+    diskstore.py    tablas sobre bloques reales: heap, ordenada y overflow
     diskindex.py    índices sobre el árbol B+ en disco
+    diskhash.py     índices sobre el hash extensible en disco
     routing.py      envía cada índice al backend que puede servirlo
     codec.py        tupla <-> bytes, con mapa de nulos
   testing/

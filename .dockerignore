@@ -8,3 +8,5 @@ backend/query-engine/tests/
 backend/query-engine/data/
 benchmarks/results/
 *.bin
+data/
+*.csv

@@ -1,14 +1,16 @@
 """Sending each index to the implementation that can serve it.
 
-The on-disk B+ tree covers integer primary keys, which is what every access
-path in the experiments uses. It has no answer yet for hash indexes, for
-non-integer key columns, or for columns whose values repeat -- it treats keys
-as unique and would drop the duplicates.
+Three backends can hold an index, and none of them covers every case:
 
-Rather than let the engine lose rows or refuse those indexes outright, each one
-is routed at creation time to the backend that can hold it, and the choice is
-remembered so every later call reaches the same place. ``describe`` reports
-where each index landed and why, which is what the README and the report quote.
+* the on-disk B+ tree answers ordered ranges, but packs keys as 4-byte integers
+  and treats them as unique, so it only takes integer primary keys
+* the on-disk extendible hash returns every RID for a key and handles repeats,
+  but has no ordered traversal, so it only takes equality lookups
+* the in-memory stand-in takes anything, and is the fallback
+
+Each index is routed once, when it is created, and the choice is remembered so
+every later call reaches the same place. ``describe`` reports where each one
+landed and why, which is what ``GET /api/tables`` and the report quote.
 """
 
 from __future__ import annotations
@@ -22,24 +24,33 @@ from .port import RID, IndexManager, IOCounter
 class RoutingIndexStore:
     """IndexManager that picks a backend per index and stays consistent."""
 
-    def __init__(self, primary: IndexManager, fallback: IndexManager, io: IOCounter):
+    def __init__(
+        self,
+        candidates: list[tuple[str, IndexManager]],
+        fallback: IndexManager,
+        io: IOCounter,
+    ):
         self.io = io
-        self._primary = primary
+        self._candidates = candidates
         self._fallback = fallback
         self._routes: dict[str, IndexManager] = {}
         self._reasons: dict[str, str] = {}
 
     def create_index(self, meta: IndexMeta, schema: TableSchema) -> None:
         key = meta.name.lower()
-        refusal = self._primary.why_not(meta, schema)
-        if refusal is None:
-            self._primary.create_index(meta, schema)
-            self._routes[key] = self._primary
-            self._reasons[key] = "arbol B+ en disco"
-        else:
-            self._fallback.create_index(meta, schema)
-            self._routes[key] = self._fallback
-            self._reasons[key] = f"sustituto en memoria: {refusal}"
+        refusals = []
+        for label, backend in self._candidates:
+            refusal = backend.why_not(meta, schema)
+            if refusal is None:
+                backend.create_index(meta, schema)
+                self._routes[key] = backend
+                self._reasons[key] = label
+                return
+            refusals.append(refusal)
+
+        self._fallback.create_index(meta, schema)
+        self._routes[key] = self._fallback
+        self._reasons[key] = f"sustituto en memoria: {refusals[-1] if refusals else 'sin backend'}"
 
     def drop_index(self, name: str) -> None:
         key = name.lower()
