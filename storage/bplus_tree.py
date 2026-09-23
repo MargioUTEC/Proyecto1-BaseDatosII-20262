@@ -3,7 +3,6 @@ from disk_management import DiskManager
 
 # Cabecera del Nodo (20 bytes):
 # page_id (4), is_leaf (4), num_keys (4), next_page_id (4), prev_page_id (4)
-# Usamos little-endian "<" para ser consistentes con page.py
 NODE_HEADER_FORMAT = "<iiiii"
 NODE_HEADER_SIZE = struct.calcsize(NODE_HEADER_FORMAT)
 
