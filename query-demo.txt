@@ -1,0 +1,113 @@
+-- Demo de Heap con índices
+-- primero la tabla que se debe crear
+CREATE TABLE customers(
+  "Index" INT PRIMARY KEY,
+  "Customer Id" CHAR(15),
+  "First Name" CHAR(16),
+  "Last Name" CHAR(16),
+  "Company" CHAR(40),
+  "City" CHAR(28),
+  "Country" CHAR(56),
+  "Phone 1" CHAR(24),
+  "Phone 2" CHAR(24),
+  "Email" CHAR(48),
+  "Subscription Date" DATE,
+  "Website" CHAR(44)
+) USING HEAP;
+
+COPY customers FROM 'customers-100000.csv';
+
+-- Consulta sin indice
+SELECT "First Name", "Last Name", "Country"
+FROM customers
+WHERE "Index" = 7777;
+
+(Como todavía no existe un índice secundario, el sistema debe recorrer la tabla y leer muchas páginas)
+
+-- INDICE B+ y Hash
+CREATE INDEX ix_btree ON customers("Index") USING BTREE;
+CREATE INDEX ix_hash ON customers("Index") USING HASH;
+
+se repite la query de arriba para ver que en el planing se reducen la lectura de bloques
+
+-- CONSULTA POR RANGO
+SELECT "Index", "City", "Country" FROM customers
+WHERE "Index" BETWEEN 5000 AND 5010;
+
+SELECT "Index" FROM customers
+WHERE "Index" >= 1 AND "Index" <= 60000;
+
+Para un rango amplio, recorrer muchos RIDs mediante el índice es más costoso que leer secuencialmente la tabla.
+Por eso el planificador puede preferir un SeqScan.
+
+-- Viendo el plan sin ejecutar
+EXPLAIN SELECT * FROM customers
+WHERE "Index" = 42;
+
+-- PROBANDO ELIMINACION
+DELETE FROM customers WHERE "Index" = 77777;
+SELECT "Index" FROM customers WHERE "Index" = 77777;
+
+-- DEMO DE SEQUENTIAL FILE
+CREATE TABLE clientes_ord (
+  "Index" INT PRIMARY KEY,
+  "Customer Id" CHAR(15),
+  "First Name" CHAR(16),
+  "Last Name" CHAR(16),
+  "Company" CHAR(40),
+  "City" CHAR(28),
+  "Country" CHAR(56),
+  "Phone 1" CHAR(24),
+  "Phone 2" CHAR(24),
+  "Email" CHAR(48),
+  "Subscription Date" DATE,
+  "Website" CHAR(44)
+) USING SEQUENTIAL;
+
+COPY clientes_ord FROM 'customers-10000.csv';
+
+SELECT "First Name", "City" FROM clientes_ord
+WHERE "Index" = 1234;
+
+-- presionar boton reorganizar
+SELECT "First Name", "City" FROM clientes_ord
+WHERE "Index" = 1234;
+
+Explicacion: antes de reorganizar, parte de los registros puede estar en el área de overflow.
+Después de reorganizar, los registros se mezclan y se escriben en orden dentro del área principal.
+Por eso la búsqueda secuencial ordenada puede reducir las lecturas
+
+SELECT "Index", "Company", "Website", "City" FROM clientes_ord
+WHERE "Index" BETWEEN 100 AND 140;
+
+-- ESTO ES DEMO DEL TAMAÑO DE PAGINA (no lo he probado)
+CREATE TABLE b1024 (
+  "Index" INT PRIMARY KEY,
+  "Country" CHAR(56),
+  "City" CHAR(28)
+) WITH (PAGE_SIZE = 1024);
+
+CREATE TABLE b4096 (
+  "Index" INT PRIMARY KEY,
+  "Country" CHAR(56),
+  "City" CHAR(28)
+) WITH (PAGE_SIZE = 4096);
+
+
+CREATE TABLE b8192 (
+  "Index" INT PRIMARY KEY,
+  "Country" CHAR(56),
+  "City" CHAR(28)
+) WITH (PAGE_SIZE = 8192);
+
+COPY b1024 FROM 'customers-10000.csv';
+COPY b4096 FROM 'customers-10000.csv';
+COPY b8192 FROM 'customers-10000.csv';
+
+SELECT "Country" FROM b1024 WHERE "Index" = 9999;
+SELECT "Country" FROM b4096 WHERE "Index" = 9999;
+SELECT "Country" FROM b8192 WHERE "Index" = 9999;
+
+La información es la misma pero cambia el tamaño de página.
+Con páginas más grandes se pueden almacenar más registros por bloque y se necesitan
+menos transferencias para recorrer la misma cantidad de datos
