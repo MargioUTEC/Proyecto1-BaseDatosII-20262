@@ -25,6 +25,7 @@ from .catalog import Catalog
 from .engine import QueryEngine
 from .storage.memory import MemoryIndexStore, MemoryTableStore
 from .storage.port import IOCounter
+from .spatial import parse_point
 
 DEFAULT_CATALOG_PATH = "data/catalog.json"
 DEFAULT_TABLE_DIR = "data/tables"
@@ -58,7 +59,7 @@ def build_engine(settings: Settings | None = None) -> QueryEngine:
 
     if settings.backend == "memory":
         storage = MemoryTableStore(io)
-        indexes = MemoryIndexStore(io)
+        indexes = _index_backend(io, settings, None)
     elif settings.backend == "disk":
         from .storage.blk01 import load
         from .storage.diskstore import DiskTableStore
@@ -74,6 +75,7 @@ def build_engine(settings: Settings | None = None) -> QueryEngine:
 
     engine = QueryEngine(catalog, storage, indexes, io, settings.data_dir)
     _reopen_existing_tables(engine, storage)
+    _reopen_spatial_indexes(engine, indexes, storage)
     return engine
 
 
@@ -86,11 +88,14 @@ def _index_backend(io: IOCounter, settings: Settings, layer):
     from .storage.routing import RoutingIndexStore
 
     candidates = []
-    if layer.BPlusTree is not None:
+    from .storage.diskrtree import DiskRTreeIndex
+
+    candidates.append(("R-Tree paginado en disco", DiskRTreeIndex(io, settings.table_dir)))
+    if layer is not None and layer.BPlusTree is not None:
         from .storage.diskindex import DiskIndexStore
 
         candidates.append(("arbol B+ en disco", DiskIndexStore(io, settings.table_dir, layer)))
-    if layer.ExtendibleHash is not None:
+    if layer is not None and layer.ExtendibleHash is not None:
         from .storage.diskhash import DiskHashIndex
 
         candidates.append(
@@ -105,3 +110,18 @@ def _reopen_existing_tables(engine: QueryEngine, storage) -> None:
     """Let the storage backend re-attach to tables the catalog already knows."""
     for schema in engine.catalog.tables():
         storage.create_table(schema)
+
+
+def _reopen_spatial_indexes(engine: QueryEngine, indexes, storage) -> None:
+    """Reattach persisted R-Tree files; build one if catalog metadata outlived it."""
+    for schema in engine.catalog.tables():
+        for meta in engine.catalog.indexes_on(schema.name):
+            if meta.kind.value != "RTREE":
+                continue
+            indexes.reopen_index(meta, schema)
+            if indexes.entry_count(meta.name) == 0 and engine.catalog.statistics(schema.name).row_count:
+                position = schema.index_of(meta.column)
+                indexes.bulk_load(meta.name, (
+                    (parse_point(record[position]), rid) for rid, record in storage.scan(schema.name)
+                    if record[position] is not None
+                ))

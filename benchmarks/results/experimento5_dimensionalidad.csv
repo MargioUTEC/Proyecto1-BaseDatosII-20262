@@ -1,0 +1,15 @@
+scope,operation,n,d,k,method,queries,index_reads,table_reads,total_reads,avg_ms,stdev_ms,avg_results,tree_pages,tree_height,build_ms
+dimensionalidad,knn,10000,2,20,R-Tree,5,3.4,20.0,23.4,2.0072,0.0646,20.0,90,2,15220.69
+dimensionalidad,knn,10000,2,20,Secuencial,5,0.0,20.0,20.0,12.6758,0.1583,20.0,90,2,15220.69
+dimensionalidad,knn,10000,4,20,R-Tree,5,13.0,20.0,33.0,1.9656,0.267,20.0,148,3,15647.28
+dimensionalidad,knn,10000,4,20,Secuencial,5,0.0,40.0,40.0,14.7008,0.0874,20.0,148,3,15647.28
+dimensionalidad,knn,10000,8,20,R-Tree,5,70.2,20.0,90.2,6.6789,0.9641,20.0,264,3,15351.11
+dimensionalidad,knn,10000,8,20,Secuencial,5,0.0,79.0,79.0,19.9786,0.3352,20.0,264,3,15351.11
+dimensionalidad,knn,10000,16,20,R-Tree,5,484.6,20.0,504.6,36.7778,0.9806,20.0,487,3,16485.63
+dimensionalidad,knn,10000,16,20,Secuencial,5,0.0,159.0,159.0,28.0772,0.4309,20.0,487,3,16485.63
+dimensionalidad,knn,10000,32,20,R-Tree,5,875.0,20.0,895.0,70.9574,3.8481,20.0,876,4,18303.18
+dimensionalidad,knn,10000,32,20,Secuencial,5,0.0,323.0,323.0,46.2019,0.6255,20.0,876,4,18303.18
+dimensionalidad,knn,10000,64,20,R-Tree,5,1902.0,20.0,1922.0,124.468,1.5415,20.0,1903,6,23963.73
+dimensionalidad,knn,10000,64,20,Secuencial,5,0.0,667.0,667.0,74.2782,0.3112,20.0,1903,6,23963.73
+dimensionalidad,knn,10000,128,20,R-Tree,5,5578.0,20.0,5598.0,276.2678,2.6555,20.0,5580,14,40126.16
+dimensionalidad,knn,10000,128,20,Secuencial,5,0.0,1429.0,1429.0,135.6427,1.2592,20.0,5580,14,40126.16

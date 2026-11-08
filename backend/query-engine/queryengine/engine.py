@@ -23,10 +23,12 @@ from .errors import CatalogError, QueryEngineError
 from .execution import Executor
 from .loader import BulkLoader, LoadReport
 from .planner import Planner
-from .planner.plan import DeletePlan, InsertPlan, PlanNode
+from .planner.cost import CostEstimate
+from .planner.plan import DeletePlan, InsertPlan, PlanNode, RTreeWindowScan
 from .sql import ast, parse
+from .spatial import parse_point
 from .storage.port import RID, IndexManager, IOCounter, Record, StorageEngine
-from .types import parse_type
+from .types import TypeKind, parse_type
 
 
 @dataclass
@@ -173,6 +175,93 @@ class QueryEngine:
             )
         return listing
 
+    def spatial_query(
+        self,
+        table: str,
+        column: str,
+        operation: str,
+        center: tuple[float, float] | None = None,
+        radius: float | None = None,
+        window: tuple[float, float, float, float] | None = None,
+        include_mbrs: bool = False,
+    ) -> dict:
+        """Run a point-radius or rectangle query and return map-ready rows."""
+        schema = self._catalog.table(table)
+        spatial_column = schema.column(column)
+        if spatial_column.type.kind not in (TypeKind.CHAR, TypeKind.VARCHAR):
+            raise CatalogError("la columna espacial debe ser CHAR/VARCHAR con formato POINT(lon lat)")
+
+        mark = self._io.snapshot()
+        started = time.perf_counter()
+        if operation == "radius":
+            if center is None or radius is None or radius < 0:
+                raise CatalogError("radius requiere un centro y un radio no negativo")
+            statement = ast.Select(
+                schema.name,
+                None,
+                ast.WithinRadius(spatial_column.name, center, radius),
+            )
+            plan = self._planner.plan(statement)
+            plan.include_mbrs = include_mbrs
+        elif operation == "window":
+            if window is None or window[0] > window[2] or window[1] > window[3]:
+                raise CatalogError("window requiere xmin <= xmax e ymin <= ymax")
+            index = next((meta for meta in self._catalog.indexes_on(schema.name)
+                          if meta.kind is IndexKind.RTREE
+                          and meta.column.lower() == spatial_column.name.lower()), None)
+            rows_estimate = max(1, round(self._catalog.statistics(schema.name).row_count * 0.1))
+            pages = schema.page_count(self._catalog.statistics(schema.name).row_count)
+            blocks = self._indexes.height(index.name) + rows_estimate if index else pages
+            plan = RTreeWindowScan(
+                table=schema.name,
+                index=index.name if index else None,
+                column=spatial_column.name,
+                window=window,
+                include_mbrs=include_mbrs,
+                estimate=CostEstimate(
+                    float(blocks), rows_estimate,
+                    "R-Tree por interseccion de MBR" if index else "escaneo secuencial por ventana",
+                ),
+            )
+        else:
+            raise CatalogError("operation debe ser radius o window")
+        plan_ms = _elapsed(started)
+
+        started = time.perf_counter()
+        found = list(self._executor.execute(plan, schema))
+        records = [record for _, record in found]
+        points = [parse_point(record[schema.index_of(spatial_column.name)]) for record in records]
+        execution_ms = _elapsed(started)
+        delta = self._io.since(mark)
+        runtime = plan.runtime or {
+            "index_reads": 0, "index_writes": 0, "table_reads": 0,
+            "table_writes": 0, "index_ms": 0.0, "table_ms": execution_ms,
+        }
+        metrics = Metrics(
+            plan_ms=plan_ms,
+            execution_ms=execution_ms,
+            disk_reads=delta.disk_reads,
+            disk_writes=delta.disk_writes,
+        ).to_dict()
+        metrics.update(runtime)
+        if operation == "radius":
+            query_geometry = {"type": "circle", "center": list(center), "radius": radius}
+        else:
+            query_geometry = {"type": "rectangle", "window": list(window)}
+        return {
+            "table": schema.name,
+            "column": spatial_column.name,
+            "operation": operation,
+            "columns": list(schema.column_names),
+            "rows": [list(record) for record in records],
+            "row_count": len(records),
+            "points": [list(point) for point in points],
+            "query_geometry": query_geometry,
+            "mbrs": [list(mbr) for mbr in getattr(plan, "mbrs", [])] if include_mbrs else None,
+            "plan": plan.explain(),
+            "metrics": metrics,
+        }
+
     def reorganize(self, table: str) -> dict:
         schema = self._catalog.table(table)
         if schema.storage is not StorageKind.SEQUENTIAL:
@@ -272,6 +361,9 @@ class QueryEngine:
     def _create_index(self, statement: ast.CreateIndex) -> QueryResult:
         schema = self._catalog.table(statement.table)
         column = schema.column(statement.column)
+        if statement.kind == "RTREE":
+            if column.type.kind.value not in ("CHAR", "VARCHAR"):
+                raise CatalogError("la columna RTREE debe almacenar POINT(lon lat) en CHAR/VARCHAR")
         meta = IndexMeta(
             name=statement.name,
             table=schema.name,
@@ -285,23 +377,31 @@ class QueryEngine:
             keys: set = set()
             entries = []
             for rid, record in self._storage.scan(schema.name):
-                keys.add(record[position])
-                entries.append((record[position], rid))
+                key = record[position]
+                if meta.kind is IndexKind.RTREE:
+                    if key is None:
+                        continue
+                    key = _spatial_key(key)
+                keys.add(key)
+                entries.append((key, rid))
             self._indexes.bulk_load(meta.name, entries)
         except Exception:
             self._catalog.drop_index(meta.name)
+            self._indexes.drop_index(meta.name)
             raise
         if entries:
-            self._catalog.set_distinct(schema.name, column.name, len(keys))
-            comparable = [key for key in keys if key is not None]
-            if comparable:
-                self._catalog.set_bounds(schema.name, column.name, min(comparable), max(comparable))
+            if meta.kind is not IndexKind.RTREE:
+                self._catalog.set_distinct(schema.name, column.name, len(keys))
+                comparable = [key for key in keys if key is not None]
+                if comparable:
+                    self._catalog.set_bounds(schema.name, column.name, min(comparable), max(comparable))
         return QueryResult(
             statement="CreateIndex",
             affected_rows=len(entries),
             message=(
                 f"indice {meta.kind.value} '{meta.name}' creado sobre "
-                f"{schema.name}({column.name}) con {len(entries)} entradas"
+                f"{schema.name}({column.name}) "
+                f"con {len(entries)} entradas"
             ),
         )
 
@@ -320,9 +420,17 @@ class QueryEngine:
         inserted = 0
         for values in statement.rows:
             record = self._build_record(schema, statement.columns, values)
+            keys = {}
+            for meta in indexes:
+                value = record[positions[meta.name]]
+                if meta.kind is IndexKind.RTREE and value is not None:
+                    value = _spatial_key(value)
+                keys[meta.name] = value
             rid = self._storage.insert(schema.name, record)
             for meta in indexes:
-                self._indexes.insert(meta.name, record[positions[meta.name]], rid)
+                if meta.kind is IndexKind.RTREE and keys[meta.name] is None:
+                    continue
+                self._indexes.insert(meta.name, keys[meta.name], rid)
             self._catalog.observe_row(schema.name, schema, record)
             inserted += 1
         self._flush(schema.name)
@@ -356,7 +464,10 @@ class QueryEngine:
             if not self._storage.delete(schema.name, rid):
                 continue
             for meta in indexes:
-                self._indexes.delete(meta.name, record[positions[meta.name]], rid)
+                key = record[positions[meta.name]]
+                if meta.kind is IndexKind.RTREE and key is not None:
+                    key = _spatial_key(key)
+                self._indexes.delete(meta.name, key, rid)
             removed += 1
         self._flush(schema.name)
         self._catalog.record_delete(schema.name, removed)
@@ -432,3 +543,10 @@ class QueryEngine:
 
 def _elapsed(started: float) -> float:
     return (time.perf_counter() - started) * 1000.0
+
+
+def _spatial_key(value):
+    try:
+        return parse_point(value)
+    except ValueError as exc:
+        raise CatalogError(str(exc)) from exc

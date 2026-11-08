@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="430" viewBox="0 0 760 430">
+<rect width="100%" height="100%" fill="#fff"/>
+<text x="380.0" y="28" text-anchor="middle" font-family="sans-serif" font-size="17" font-weight="bold">k-NN (k=20): efecto de la dimensión</text>
+<text transform="translate(20 200.0) rotate(-90)" text-anchor="middle" font-family="sans-serif" font-size="12">Tiempo promedio (ms)</text>
+<line x1="78" y1="342" x2="736" y2="342" stroke="#333"/>
+<line x1="78" y1="58" x2="78" y2="342" stroke="#333"/>
+<line x1="74" y1="342.0" x2="736" y2="342.0" stroke="#ddd"/>
+<text x="70" y="346.0" text-anchor="end" font-family="sans-serif" font-size="10">10^0</text>
+<line x1="74" y1="247.3" x2="736" y2="247.3" stroke="#ddd"/>
+<text x="70" y="251.3" text-anchor="end" font-family="sans-serif" font-size="10">10^1</text>
+<line x1="74" y1="152.7" x2="736" y2="152.7" stroke="#ddd"/>
+<text x="70" y="156.7" text-anchor="end" font-family="sans-serif" font-size="10">10^2</text>
+<line x1="74" y1="58.0" x2="736" y2="58.0" stroke="#ddd"/>
+<text x="70" y="62.0" text-anchor="end" font-family="sans-serif" font-size="10">10^3</text>
+<text x="78.0" y="364" text-anchor="middle" font-family="sans-serif" font-size="11">2</text>
+<text x="187.7" y="364" text-anchor="middle" font-family="sans-serif" font-size="11">4</text>
+<text x="297.3" y="364" text-anchor="middle" font-family="sans-serif" font-size="11">8</text>
+<text x="407.0" y="364" text-anchor="middle" font-family="sans-serif" font-size="11">16</text>
+<text x="516.7" y="364" text-anchor="middle" font-family="sans-serif" font-size="11">32</text>
+<text x="626.3" y="364" text-anchor="middle" font-family="sans-serif" font-size="11">64</text>
+<text x="736.0" y="364" text-anchor="middle" font-family="sans-serif" font-size="11">128</text>
+<polyline points="78.0,313.4 187.7,314.2 297.3,263.9 407.0,193.8 516.7,166.8 626.3,143.7 736.0,110.9" fill="none" stroke="#0d6b62" stroke-width="2.5"/>
+<circle cx="78.0" cy="313.4" r="3.5" fill="#0d6b62"/>
+<circle cx="187.7" cy="314.2" r="3.5" fill="#0d6b62"/>
+<circle cx="297.3" cy="263.9" r="3.5" fill="#0d6b62"/>
+<circle cx="407.0" cy="193.8" r="3.5" fill="#0d6b62"/>
+<circle cx="516.7" cy="166.8" r="3.5" fill="#0d6b62"/>
+<circle cx="626.3" cy="143.7" r="3.5" fill="#0d6b62"/>
+<circle cx="736.0" cy="110.9" r="3.5" fill="#0d6b62"/>
+<line x1="90" y1="400" x2="112" y2="400" stroke="#0d6b62" stroke-width="3"/>
+<text x="118" y="404" font-family="sans-serif" font-size="11">R-Tree</text>
+<polyline points="78.0,237.6 187.7,231.5 297.3,218.9 407.0,204.9 516.7,184.4 626.3,164.9 736.0,140.1" fill="none" stroke="#9c5410" stroke-width="2.5"/>
+<circle cx="78.0" cy="237.6" r="3.5" fill="#9c5410"/>
+<circle cx="187.7" cy="231.5" r="3.5" fill="#9c5410"/>
+<circle cx="297.3" cy="218.9" r="3.5" fill="#9c5410"/>
+<circle cx="407.0" cy="204.9" r="3.5" fill="#9c5410"/>
+<circle cx="516.7" cy="184.4" r="3.5" fill="#9c5410"/>
+<circle cx="626.3" cy="164.9" r="3.5" fill="#9c5410"/>
+<circle cx="736.0" cy="140.1" r="3.5" fill="#9c5410"/>
+<line x1="300" y1="400" x2="322" y2="400" stroke="#9c5410" stroke-width="3"/>
+<text x="328" y="404" font-family="sans-serif" font-size="11">Secuencial</text>
+</svg>

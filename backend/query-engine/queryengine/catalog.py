@@ -33,6 +33,7 @@ class StorageKind(Enum):
 class IndexKind(Enum):
     BTREE = "BTREE"
     HASH = "HASH"
+    RTREE = "RTREE"
 
     @property
     def supports_range(self) -> bool:

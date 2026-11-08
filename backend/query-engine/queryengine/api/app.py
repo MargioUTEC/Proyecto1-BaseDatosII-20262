@@ -1,6 +1,6 @@
 """REST surface consumed by the web client.
 
-Three endpoints, matching the contract the frontend module expects:
+REST endpoints consumed by the web client, including the spatial map query:
 
     POST /api/query              run one statement, return rows plus cost
     GET  /api/tables             catalog listing with schemas and indexes
@@ -22,6 +22,8 @@ from .schemas import (
     QueryRequest,
     QueryResponse,
     ReorganizeRequest,
+    SpatialQueryRequest,
+    SpatialQueryResponse,
 )
 
 
@@ -56,6 +58,18 @@ def create_app() -> FastAPI:
     @app.post("/api/query", response_model=QueryResponse)
     async def run_query(request: QueryRequest) -> dict:
         return app.state.engine.execute(request.sql).to_dict()
+
+    @app.post("/api/spatial/query", response_model=SpatialQueryResponse)
+    async def run_spatial_query(request: SpatialQueryRequest) -> dict:
+        return app.state.engine.spatial_query(
+            table=request.table,
+            column=request.column,
+            operation=request.operation,
+            center=request.center,
+            radius=request.radius,
+            window=request.window,
+            include_mbrs=request.include_mbrs,
+        )
 
     @app.get("/api/tables")
     async def list_tables() -> dict:
