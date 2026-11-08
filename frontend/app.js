@@ -15,7 +15,7 @@
   var CLAVES = ("AND AS ASC BETWEEN BY COPY CREATE DELETE DELIMITER DESC DROP EXPLAIN FALSE FROM " +
     "HEADER INDEX INSERT INTO IS KEY LIMIT NOT NULL ON OR ORDER PRIMARY SELECT TABLE TRUE " +
     "USING VALUES WHERE WITH").split(" ");
-  var TIPOS = ("INT BIGINT FLOAT DOUBLE BOOL CHAR VARCHAR DATE HEAP SEQUENTIAL BTREE HASH " +
+  var TIPOS = ("INT BIGINT FLOAT DOUBLE BOOL CHAR VARCHAR DATE HEAP SEQUENTIAL BTREE HASH RTREE " +
     "PAGE_SIZE").split(" ");
 
   var RECETAS = [
@@ -49,6 +49,8 @@
   var $ = function (id) { return document.getElementById(id); };
   var sql = $("sql"), pintado = $("pintado");
   var ultimo = { columnas: [], filas: [], pagina: 0 };
+  var mapa = null, capaConsulta = null, capaResultados = null, capaMbr = null;
+  var esquinaVentana = null, ventanaArmada = false, ultimaPeticionEspacial = null;
 
   /* ---------- resaltado ---------- */
 
@@ -111,6 +113,7 @@
     return pedir("/tables").then(function (datos) {
       marcarEnlace("ok", "motor en linea");
       dibujarTablas(datos.tables || []);
+      configurarSelectorEspacial(datos.tables || []);
     }).catch(function () {
       marcarEnlace("error", "sin motor");
       $("listaTablas").innerHTML =
@@ -209,6 +212,245 @@
       }
       caja.appendChild(ficha);
     });
+  }
+
+  /* ---------- visor espacial ---------- */
+
+  function iniciarMapa() {
+    if (!window.L) {
+      $("avisoEspacial").textContent = "No se pudo cargar Leaflet; revisa la conexión al CDN.";
+      $("avisoEspacial").hidden = false;
+      return;
+    }
+    mapa = L.map("mapa").setView([-12.0464, -77.0428], 11);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "© OpenStreetMap"
+    }).addTo(mapa);
+    capaConsulta = L.layerGroup().addTo(mapa);
+    capaMbr = L.layerGroup().addTo(mapa);
+    capaResultados = L.layerGroup().addTo(mapa);
+    mapa.on("click", clickMapaEspacial);
+    window.setTimeout(function () { mapa.invalidateSize(); }, 150);
+  }
+
+  function esColumnaPunto(columna) {
+    return /^(CHAR|VARCHAR)(\(|$)/i.test(columna.type || "");
+  }
+
+  function configurarSelectorEspacial(tablas) {
+    var selector = $("espTabla"), anterior = selector.value;
+    var elegibles = tablas.filter(function (tabla) {
+      return (tabla.columns || []).some(esColumnaPunto);
+    });
+    selector.innerHTML = "";
+    if (!elegibles.length) {
+      selector.innerHTML = '<option value="">No hay columnas CHAR/VARCHAR</option>';
+      $("espColumna").innerHTML = '<option value="">—</option>';
+      $("buscarEspacial").disabled = true;
+      $("estadoEspacial").textContent = "Usa POINT(lon lat) en una columna de texto";
+      return;
+    }
+    elegibles.forEach(function (tabla) {
+      var opcion = document.createElement("option");
+      opcion.value = tabla.name;
+      opcion.textContent = tabla.name;
+      selector.appendChild(opcion);
+    });
+    if (elegibles.some(function (tabla) { return tabla.name === anterior; })) selector.value = anterior;
+    selector.onchange = function () { configurarColumnasEspaciales(elegibles); };
+    configurarColumnasEspaciales(elegibles);
+  }
+
+  function configurarColumnasEspaciales(tablas) {
+    var tabla = tablas.find(function (item) { return item.name === $("espTabla").value; });
+    var selector = $("espColumna"), anterior = selector.value;
+    selector.innerHTML = "";
+    if (!tabla) return;
+    var columns = (tabla.columns || []).filter(esColumnaPunto);
+    columns.sort(function (a, b) {
+      var ai = (tabla.indexes || []).some(function (ix) { return ix.kind === "RTREE" && ix.column === a.name; });
+      var bi = (tabla.indexes || []).some(function (ix) { return ix.kind === "RTREE" && ix.column === b.name; });
+      return Number(bi) - Number(ai);
+    });
+    columns.forEach(function (columna) {
+      var opcion = document.createElement("option");
+      opcion.value = columna.name;
+      opcion.textContent = columna.name + ((tabla.indexes || []).some(function (ix) {
+        return ix.kind === "RTREE" && ix.column === columna.name;
+      }) ? " · RTREE" : " · SeqScan");
+      selector.appendChild(opcion);
+    });
+    if (columns.some(function (columna) { return columna.name === anterior; })) selector.value = anterior;
+    $("buscarEspacial").disabled = columns.length === 0;
+    $("estadoEspacial").textContent = columns.length
+      ? "Radio y ventana sobre POINT(lon lat)"
+      : "No hay columnas de puntos";
+  }
+
+  function cambiarOperacionEspacial() {
+    var radio = $("espOperacion").value === "radius";
+    $("paramRadio").hidden = !radio;
+    $("paramVentana").hidden = radio;
+    ventanaArmada = false;
+    esquinaVentana = null;
+    $("estadoEspacial").textContent = radio
+      ? "Clic en el mapa para fijar el centro"
+      : "Usa dos clics para definir la ventana";
+    dibujarGeometriaConsulta();
+  }
+
+  function numero(id) {
+    var value = $(id).value.trim();
+    return value === "" ? NaN : Number(value);
+  }
+
+  function clickMapaEspacial(evento) {
+    if ($("espOperacion").value === "radius") {
+      $("centroX").value = evento.latlng.lng.toFixed(6);
+      $("centroY").value = evento.latlng.lat.toFixed(6);
+      dibujarGeometriaConsulta();
+      return;
+    }
+    if (!ventanaArmada) return;
+    var point = [evento.latlng.lng, evento.latlng.lat];
+    if (!esquinaVentana) {
+      esquinaVentana = point;
+      $("estadoEspacial").textContent = "Marca la segunda esquina";
+      return;
+    }
+    $("xmin").value = Math.min(esquinaVentana[0], point[0]).toFixed(6);
+    $("xmax").value = Math.max(esquinaVentana[0], point[0]).toFixed(6);
+    $("ymin").value = Math.min(esquinaVentana[1], point[1]).toFixed(6);
+    $("ymax").value = Math.max(esquinaVentana[1], point[1]).toFixed(6);
+    ventanaArmada = false;
+    esquinaVentana = null;
+    $("estadoEspacial").textContent = "Ventana lista";
+    dibujarGeometriaConsulta();
+  }
+
+  function dibujarGeometriaConsulta(centrar) {
+    if (!mapa || !capaConsulta) return;
+    capaConsulta.clearLayers();
+    var operation = $("espOperacion").value, shape;
+    if (operation === "radius") {
+      var x = numero("centroX"), y = numero("centroY"), r = numero("radio");
+      if (![x, y, r].every(Number.isFinite) || r < 0) return;
+      var ring = [];
+      for (var i = 0; i <= 64; i++) {
+        var angle = 2 * Math.PI * i / 64;
+        ring.push([y + r * Math.sin(angle), x + r * Math.cos(angle)]);
+      }
+      shape = L.polygon(ring, { color: "#9c5410", weight: 2, fillOpacity: 0.12 });
+      L.circleMarker([y, x], { radius: 4, color: "#9c5410", fillOpacity: 1 }).addTo(capaConsulta);
+    } else {
+      var xmin = numero("xmin"), ymin = numero("ymin");
+      var xmax = numero("xmax"), ymax = numero("ymax");
+      if (![xmin, ymin, xmax, ymax].every(Number.isFinite) || xmin > xmax || ymin > ymax) return;
+      shape = L.polygon([[ymin, xmin], [ymin, xmax], [ymax, xmax], [ymax, xmin]],
+        { color: "#9c5410", weight: 2, fillOpacity: 0.12 });
+    }
+    shape.addTo(capaConsulta);
+    if (centrar) mapa.fitBounds(shape.getBounds(), { padding: [18, 18], maxZoom: 15 });
+  }
+
+  function ejecutarConsultaEspacial() {
+    var operation = $("espOperacion").value;
+    var request = {
+      table: $("espTabla").value,
+      column: $("espColumna").value,
+      operation: operation,
+      include_mbrs: $("mostrarMbr").checked
+    };
+    if (!request.table || !request.column) return;
+    if (operation === "radius") {
+      request.center = [numero("centroX"), numero("centroY")];
+      request.radius = numero("radio");
+      if (!request.center.every(Number.isFinite) || !Number.isFinite(request.radius) || request.radius < 0) {
+        avisoEspacial("Ingresa centro y radio válidos.");
+        return;
+      }
+    } else {
+      request.window = [numero("xmin"), numero("ymin"), numero("xmax"), numero("ymax")];
+      if (!request.window.every(Number.isFinite) || request.window[0] > request.window[2] || request.window[1] > request.window[3]) {
+        avisoEspacial("Define una ventana con xmin ≤ xmax e ymin ≤ ymax.");
+        return;
+      }
+    }
+    ultimaPeticionEspacial = request;
+    $("buscarEspacial").disabled = true;
+    $("avisoEspacial").hidden = true;
+    $("estadoEspacial").textContent = "Consultando…";
+    pedir("/spatial/query", request).then(function (datos) {
+      mostrarResultado(datos);
+      mostrarTelemetria(datos);
+      dibujarResultadosEspaciales(datos);
+      mostrarMetricasEspaciales(datos);
+      $("estadoEspacial").textContent = datos.row_count + " puntos";
+    }).catch(function (error) {
+      avisoEspacial((error && error.error) || "No se pudo ejecutar la consulta espacial.");
+      $("estadoEspacial").textContent = "Error en la consulta";
+    }).then(function () {
+      $("buscarEspacial").disabled = false;
+    });
+  }
+
+  function dibujarResultadosEspaciales(datos) {
+    if (!mapa) return;
+    capaResultados.clearLayers();
+    capaMbr.clearLayers();
+    capaConsulta.clearLayers();
+    if (datos.operation === "radius") {
+      var cx = datos.query_geometry.center[0], cy = datos.query_geometry.center[1];
+      var r = datos.query_geometry.radius, ring = [];
+      for (var i = 0; i <= 64; i++) {
+        var angle = 2 * Math.PI * i / 64;
+        ring.push([cy + r * Math.sin(angle), cx + r * Math.cos(angle)]);
+      }
+      L.polygon(ring, { color: "#9c5410", weight: 2, fillOpacity: 0.12 }).addTo(capaConsulta);
+      L.circleMarker([cy, cx], { radius: 4, color: "#9c5410", fillOpacity: 1 }).addTo(capaConsulta);
+    } else {
+      var bounds = datos.query_geometry.window;
+      L.polygon([[bounds[1], bounds[0]], [bounds[1], bounds[2]],
+        [bounds[3], bounds[2]], [bounds[3], bounds[0]]],
+        { color: "#9c5410", weight: 2, fillOpacity: 0.12 }).addTo(capaConsulta);
+    }
+    (datos.points || []).forEach(function (point, index) {
+      var row = datos.rows[index] || [];
+      var detail = datos.columns.map(function (name, i) {
+        return "<b>" + escapar(name) + ":</b> " + escapar(String(row[i]));
+      }).join("<br>");
+      L.circleMarker([point[1], point[0]], {
+        radius: 5, color: "#0d6b62", fillColor: "#4cc0b4", fillOpacity: 0.88, weight: 1
+      }).bindPopup(detail).addTo(capaResultados);
+    });
+    (datos.mbrs || []).forEach(function (mbr) {
+      L.rectangle([[mbr[1], mbr[0]], [mbr[3], mbr[2]]], {
+        color: "#0d6b62", weight: 1, fill: false, dashArray: "4 3"
+      }).addTo(capaMbr);
+    });
+    var boundsAll = L.latLngBounds([]);
+    [capaConsulta, capaResultados].forEach(function (group) {
+      group.eachLayer(function (layer) {
+        if (typeof layer.getBounds === "function") boundsAll.extend(layer.getBounds());
+        else if (typeof layer.getLatLng === "function") boundsAll.extend(layer.getLatLng());
+      });
+    });
+    if (boundsAll.isValid()) mapa.fitBounds(boundsAll, { padding: [18, 18], maxZoom: 15 });
+    window.setTimeout(function () { mapa.invalidateSize(); }, 80);
+  }
+
+  function mostrarMetricasEspaciales(datos) {
+    var m = datos.metrics || {};
+    $("espFilas").textContent = miles(datos.row_count);
+    $("espIndice").textContent = miles(m.index_reads) + " R · " + miles(m.index_writes) + " W";
+    $("espTablaIO").textContent = miles(m.table_reads) + " R · " + miles(m.table_writes) + " W";
+    $("espTiempo").textContent = ms(m.total_ms) + " total";
+  }
+
+  function avisoEspacial(mensaje) {
+    $("avisoEspacial").textContent = mensaje;
+    $("avisoEspacial").hidden = false;
   }
 
   /* ---------- ejecucion ---------- */
@@ -337,7 +579,7 @@
       metricas.disk_reads + " R · " + metricas.disk_writes + " W · " + ms(metricas.total_ms);
   }
 
-  var ACCESO = /^(SeqScan|IndexScan|IndexRangeScan|SequentialSearch|SequentialRangeScan)$/;
+  var ACCESO = /^(SeqScan|IndexScan|IndexRangeScan|SequentialSearch|SequentialRangeScan|RTreeRadiusScan|SeqRadiusScan|RTreeWindowScan|SeqWindowScan|RTreeKNNScan|SeqKNNScan)$/;
 
   function dibujarNodo(nodo) {
     var esAcceso = ACCESO.test(nodo.node);
@@ -350,7 +592,7 @@
     html += "</div>";
 
     var detalles = [];
-    ["table", "index", "using", "condition", "columns", "by", "rows", "target", "on", "from", "storage"]
+    ["table", "index", "using", "condition", "columns", "column", "point", "radius", "window", "k", "by", "rows", "target", "on", "from", "storage"]
       .forEach(function (llave) {
         if (nodo[llave] !== undefined) detalles.push(llave + ": " + nodo[llave]);
       });
@@ -415,6 +657,19 @@
 
   $("ejecutar").addEventListener("click", ejecutar);
   $("recargar").addEventListener("click", cargarTablas);
+  $("espOperacion").addEventListener("change", cambiarOperacionEspacial);
+  $("buscarEspacial").addEventListener("click", ejecutarConsultaEspacial);
+  $("dibujarVentana").addEventListener("click", function () {
+    ventanaArmada = true;
+    esquinaVentana = null;
+    $("estadoEspacial").textContent = "Marca la primera esquina en el mapa";
+  });
+  ["centroX", "centroY", "radio", "xmin", "ymin", "xmax", "ymax"].forEach(function (id) {
+    $(id).addEventListener("input", function () { dibujarGeometriaConsulta(); });
+  });
+  $("mostrarMbr").addEventListener("change", function () {
+    if (ultimaPeticionEspacial) ejecutarConsultaEspacial();
+  });
   $("prev").addEventListener("click", function () {
     if (ultimo.pagina > 0) { ultimo.pagina--; dibujarPagina(); }
   });
@@ -438,6 +693,8 @@
     if (guardado) document.documentElement.dataset.tema = guardado;
   } catch (e) { /* modo privado */ }
 
+  iniciarMapa();
+  cambiarOperacionEspacial();
   sql.value = RECETAS[4][1];
   repintar();
   cargarTablas();

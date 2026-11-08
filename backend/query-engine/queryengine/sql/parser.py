@@ -45,12 +45,13 @@ from .ast import (
     OrderBy,
     Select,
     Statement,
+    WithinRadius,
 )
 from .lexer import tokenize
 from .tokens import Token, TokenType
 
 _STORAGE_KINDS = ("HEAP", "SEQUENTIAL")
-_INDEX_KINDS = ("BTREE", "HASH")
+_INDEX_KINDS = ("BTREE", "HASH", "RTREE")
 _COMPARISONS = {op.value: op for op in Comparison}
 _COMPARISONS["!="] = Comparison.NE
 
@@ -265,6 +266,19 @@ class Parser:
         if not self._match_keyword("ORDER"):
             return None
         self._expect_keyword("BY")
+        if self._current().type is TokenType.IDENTIFIER and self._current().value.upper() == "DISTANCE":
+            self._advance()
+            self._expect_punctuation("(")
+            column = self._identifier("columna espacial")
+            self._expect_punctuation(",")
+            point = self._coordinate_values()
+            self._expect_punctuation(")")
+            descending = False
+            if self._match_keyword("DESC"):
+                descending = True
+            else:
+                self._match_keyword("ASC")
+            return OrderBy(descending=descending, spatial_column=column, point=point)
         column = self._identifier("nombre de columna")
         descending = False
         if self._match_keyword("DESC"):
@@ -298,6 +312,19 @@ class Parser:
         return self._predicate()
 
     def _predicate(self) -> Expression:
+        if (self._current().type is TokenType.IDENTIFIER
+                and self._peek(1).type is TokenType.IDENTIFIER
+                and self._peek(1).value.upper() == "WITHIN_RADIUS"):
+            column = self._advance().value
+            self._advance()
+            self._expect_punctuation("(")
+            point = self._coordinate_values()
+            self._expect_punctuation(",")
+            radius = self._numeric_value()
+            self._expect_punctuation(")")
+            if radius < 0:
+                raise self._error("el radio debe ser no negativo")
+            return WithinRadius(column, point, radius)
         if self._match_punctuation("("):
             inner = self._disjunction()
             self._expect_punctuation(")")
@@ -326,6 +353,21 @@ class Parser:
             return Compare(left, _COMPARISONS[token.value], self._operand())
 
         raise self._error(f"se esperaba un operador de comparacion y se encontro {token}")
+
+    def _coordinate_values(self) -> tuple[float, float]:
+        self._expect_punctuation("(")
+        first = self._numeric_value()
+        self._expect_punctuation(",")
+        second = self._numeric_value()
+        self._expect_punctuation(")")
+        return float(first), float(second)
+
+    def _numeric_value(self) -> float:
+        token = self._current()
+        if token.type is not TokenType.NUMBER:
+            raise self._error(f"se esperaba una coordenada numerica y se encontro {token}")
+        self._advance()
+        return self._number(token.value)
 
     def _operand(self) -> Expression:
         token = self._current()

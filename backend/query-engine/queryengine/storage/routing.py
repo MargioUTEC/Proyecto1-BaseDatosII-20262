@@ -52,6 +52,17 @@ class RoutingIndexStore:
         self._routes[key] = self._fallback
         self._reasons[key] = f"sustituto en memoria: {refusals[-1] if refusals else 'sin backend'}"
 
+    def reopen_index(self, meta: IndexMeta, schema: TableSchema) -> None:
+        key = meta.name.lower()
+        for label, backend in self._candidates:
+            if backend.why_not(meta, schema) is None:
+                reopen = getattr(backend, "reopen_index", backend.create_index)
+                reopen(meta, schema)
+                self._routes[key] = backend
+                self._reasons[key] = label
+                return
+        self.create_index(meta, schema)
+
     def drop_index(self, name: str) -> None:
         key = name.lower()
         backend = self._routes.pop(key, None)
@@ -76,6 +87,18 @@ class RoutingIndexStore:
 
     def bulk_load(self, name: str, entries: Iterable[tuple[object, RID]]) -> None:
         self._route(name).bulk_load(name, entries)
+
+    def spatial_radius(self, name: str, point, radius: float):
+        return self._route(name).search_radius(name, point, radius)
+
+    def spatial_window(self, name: str, window):
+        return self._route(name).search_window(name, window)
+
+    def spatial_knn(self, name: str, point, k: int):
+        return self._route(name).knn(name, point, k)
+
+    def entry_count(self, name: str) -> int:
+        return self._route(name).entry_count(name)
 
     def describe(self) -> dict[str, str]:
         """Where each index lives, for the catalog listing and the report."""

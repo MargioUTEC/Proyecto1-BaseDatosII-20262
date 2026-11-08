@@ -36,6 +36,8 @@ class Lexer:
         char = self._peek()
         if char in _IDENTIFIER_START:
             return self._read_word()
+        if char == "-" and self._peek(1).isdigit():
+            return self._read_number()
         if char.isdigit() or (char == "." and self._peek(1).isdigit()):
             return self._read_number()
         if char == "'":
@@ -59,6 +61,8 @@ class Lexer:
 
     def _read_number(self) -> Token:
         start, line, column = self._position, self._line, self._column
+        if self._peek() == "-":
+            self._advance()
         seen_dot = False
         seen_exponent = False
         while not self._at_end():
