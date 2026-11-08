@@ -94,6 +94,13 @@ class IsNull(Expression):
     negated: bool = False
 
 
+@dataclass(frozen=True)
+class WithinRadius(Expression):
+    column: str
+    point: tuple[float, float]
+    radius: float
+
+
 # -- statements ---------------------------------------------------------
 
 
@@ -145,8 +152,10 @@ class Insert(Statement):
 
 @dataclass(frozen=True)
 class OrderBy:
-    column: str
+    column: str = ""
     descending: bool = False
+    spatial_column: str | None = None
+    point: tuple[float, float] | None = None
 
 
 @dataclass(frozen=True)

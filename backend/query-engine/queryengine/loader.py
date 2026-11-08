@@ -18,8 +18,9 @@ import os
 import time
 from dataclasses import dataclass, field
 
-from .catalog import Catalog, StorageKind, TableSchema
+from .catalog import Catalog, IndexKind, StorageKind, TableSchema
 from .errors import CatalogError, QueryEngineError
+from .spatial import parse_point
 from .storage.port import IndexManager, IOCounter, StorageEngine
 
 DISTINCT_TRACKING_LIMIT = 100_000
@@ -112,6 +113,13 @@ class BulkLoader:
                 report.rows_read += 1
                 try:
                     record = self._build(schema, targets, raw, null_token)
+                    spatial_keys = {}
+                    for meta in indexes:
+                        if meta.kind is IndexKind.RTREE and record[index_positions[meta.name]] is not None:
+                            try:
+                                spatial_keys[meta.name] = parse_point(record[index_positions[meta.name]])
+                            except ValueError as exc:
+                                raise CatalogError(str(exc)) from exc
                 except QueryEngineError as exc:
                     report.rows_rejected += 1
                     if len(report.rejects) < max_rejects:
@@ -126,8 +134,15 @@ class BulkLoader:
 
                 rid = self._storage.insert(schema.name, record)
                 for meta in indexes:
-                    key = record[index_positions[meta.name]]
+                    if meta.kind is IndexKind.RTREE:
+                        key = spatial_keys.get(meta.name)
+                        if key is None:
+                            continue
+                    else:
+                        key = record[index_positions[meta.name]]
                     self._indexes.insert(meta.name, key, rid)
+                    if meta.kind is IndexKind.RTREE:
+                        continue
                     bucket = distinct[meta.column.lower()]
                     if meta.column.lower() not in overflowed:
                         bucket.add(key)

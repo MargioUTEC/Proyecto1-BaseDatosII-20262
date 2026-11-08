@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..catalog import Catalog, IndexKind, IndexMeta, StorageKind, TableSchema
+from ..types import TypeKind
 from ..errors import PlannerError
 from ..sql import ast
 from ..storage.port import IndexManager
@@ -33,6 +34,8 @@ from .plan import (
     Limit,
     PlanNode,
     Project,
+    RTreeKNNScan,
+    RTreeRadiusScan,
     SeqScan,
     SequentialRangeScan,
     SequentialSearch,
@@ -95,10 +98,39 @@ class Planner:
     def _plan_select(self, statement: ast.Select) -> PlanNode:
         schema = self._catalog.table(statement.table)
         projection = bind_projection(statement.projection, schema)
-        where = bind_expression(statement.where, schema)
-
-        node = self._access_path(schema, where)
-        if statement.order_by is not None:
+        if (statement.order_by is not None and statement.order_by.spatial_column is not None
+                and statement.where is not None):
+            raise PlannerError("k-NN espacial no admite un filtro WHERE adicional")
+        if isinstance(statement.where, ast.WithinRadius):
+            column = self._spatial_column(schema, statement.where.column)
+            index = self._spatial_index(schema, column)
+            rows = max(1, round(self._catalog.statistics(schema.name).row_count * 0.1))
+            pages = schema.page_count(self._catalog.statistics(schema.name).row_count)
+            estimate = cost.CostEstimate(
+                float((self._height(index) + rows) if index else pages), rows,
+                "R-Tree MINDIST y lecturas de tabla por RID" if index else "escaneo de tabla y filtro por radio",
+            )
+            node = RTreeRadiusScan(table=schema.name, index=index.name if index else None,
+                                   column=column, point=statement.where.point,
+                                   radius=statement.where.radius, estimate=estimate)
+        elif statement.order_by is not None and statement.order_by.spatial_column is not None:
+            column = self._spatial_column(schema, statement.order_by.spatial_column)
+            if statement.limit is None:
+                raise PlannerError("ORDER BY DISTANCE requiere LIMIT para k-NN")
+            index = self._spatial_index(schema, column)
+            rows = min(statement.limit, self._catalog.statistics(schema.name).row_count)
+            estimate = cost.CostEstimate(
+                float((self._height(index) + rows) if index else
+                      schema.page_count(self._catalog.statistics(schema.name).row_count)),
+                rows, "R-Tree k-NN por MINDIST" if index else "escaneo secuencial para k-NN",
+            )
+            node = RTreeKNNScan(table=schema.name, index=index.name if index else None,
+                                column=column, point=statement.order_by.point, count=statement.limit,
+                                estimate=estimate)
+        else:
+            where = bind_expression(statement.where, schema)
+            node = self._access_path(schema, where)
+        if statement.order_by is not None and statement.order_by.spatial_column is None:
             column = schema.column(statement.order_by.column).name
             node = Sort(child=node, column=column, descending=statement.order_by.descending)
         if statement.limit is not None:
@@ -106,6 +138,18 @@ class Planner:
         if projection != schema.column_names:
             node = Project(child=node, columns=projection)
         return node
+
+    def _spatial_index(self, schema: TableSchema, column: str) -> IndexMeta | None:
+        return next((meta for meta in self._catalog.indexes_on(schema.name)
+                     if meta.kind is IndexKind.RTREE
+                     and meta.column.lower() == column.lower()), None)
+
+    @staticmethod
+    def _spatial_column(schema: TableSchema, name: str) -> str:
+        column = schema.column(name)
+        if column.type.kind not in (TypeKind.CHAR, TypeKind.VARCHAR):
+            raise PlannerError("la columna espacial debe ser CHAR/VARCHAR con formato POINT(lon lat)")
+        return column.name
 
     def _plan_delete(self, statement: ast.Delete) -> PlanNode:
         schema = self._catalog.table(statement.table)
@@ -167,6 +211,8 @@ class Planner:
         rows = cost.expected_rows(key_range, statistics)
         consumed = _conjuncts_for(conjuncts, key_range.column)
         for meta in self._catalog.indexes_on(schema.name, key_range.column):
+            if meta.kind is IndexKind.RTREE:
+                continue
             height = self._height(meta)
             if key_range.is_equality:
                 estimate = cost.index_equality(height, rows, meta.kind is IndexKind.HASH)

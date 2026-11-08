@@ -19,6 +19,7 @@ class PlanNode:
     """Base node. ``children`` keeps the tree walkable for EXPLAIN."""
 
     estimate: CostEstimate | None = None
+    runtime: dict | None = None
 
     @property
     def label(self) -> str:
@@ -35,6 +36,8 @@ class PlanNode:
         node = {"node": self.label, **self.details()}
         if self.estimate is not None:
             node["cost"] = self.estimate.to_dict()
+        if self.runtime is not None:
+            node["runtime"] = self.runtime
         children = [child.explain() for child in self.children]
         if children:
             node["children"] = children
@@ -47,6 +50,10 @@ class PlanNode:
         head = f"{pad}-> {self.label}" + (f" ({detail})" if detail else "")
         if self.estimate is not None:
             head += f"  [~{self.estimate.blocks:.1f} bloques, ~{self.estimate.rows} filas]"
+        if self.runtime is not None:
+            head += (f"  [idx {self.runtime['index_reads']}R/{self.runtime['index_writes']}W, "
+                     f"tabla {self.runtime['table_reads']}R/{self.runtime['table_writes']}W, "
+                     f"{self.runtime['index_ms']}+{self.runtime['table_ms']} ms]")
         lines = [head]
         lines.extend(child.describe(depth + 1) for child in self.children)
         return "\n".join(lines)
@@ -110,6 +117,58 @@ class IndexRangeScan(PlanNode):
             "condition": _range_text(self.column, self.lower, self.upper,
                                      self.lower_inclusive, self.upper_inclusive),
         }
+
+
+@dataclass
+class RTreeRadiusScan(PlanNode):
+    table: str = ""
+    index: str | None = None
+    column: str = ""
+    point: tuple[float, float] = (0.0, 0.0)
+    radius: float = 0.0
+    include_mbrs: bool = False
+
+    @property
+    def label(self) -> str:
+        return "RTreeRadiusScan" if self.index else "SeqRadiusScan"
+
+    def details(self) -> dict:
+        return {"table": self.table, "index": self.index, "column": self.column,
+                "point": self.point, "radius": self.radius}
+
+
+@dataclass
+class RTreeKNNScan(PlanNode):
+    table: str = ""
+    index: str | None = None
+    column: str = ""
+    point: tuple[float, float] = (0.0, 0.0)
+    count: int = 1
+
+    @property
+    def label(self) -> str:
+        return "RTreeKNNScan" if self.index else "SeqKNNScan"
+
+    def details(self) -> dict:
+        return {"table": self.table, "index": self.index, "column": self.column,
+                "point": self.point, "k": self.count}
+
+
+@dataclass
+class RTreeWindowScan(PlanNode):
+    table: str = ""
+    index: str | None = None
+    column: str = ""
+    window: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    include_mbrs: bool = False
+
+    @property
+    def label(self) -> str:
+        return "RTreeWindowScan" if self.index else "SeqWindowScan"
+
+    def details(self) -> dict:
+        return {"table": self.table, "index": self.index, "column": self.column,
+                "window": self.window}
 
 
 @dataclass
@@ -189,6 +248,8 @@ class Sort(PlanNode):
     child: PlanNode | None = None
     column: str = ""
     descending: bool = False
+    spatial_column: str | None = None
+    point: tuple[float, float] | None = None
 
     @property
     def label(self) -> str:
