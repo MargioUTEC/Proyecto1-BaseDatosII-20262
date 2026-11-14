@@ -95,6 +95,14 @@ class IsNull(Expression):
 
 
 @dataclass(frozen=True)
+class Match(Expression):
+    # columna MATCH 'consulta' (booleana o por relevancia).
+
+    column: str
+    query: str
+
+
+@dataclass(frozen=True)
 class WithinRadius(Expression):
     column: str
     point: tuple[float, float]
@@ -136,6 +144,7 @@ class CreateIndex(Statement):
     table: str
     column: str
     kind: str
+    options: tuple[tuple[str, object], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -165,6 +174,8 @@ class Select(Statement):
     where: Expression | None = None
     order_by: OrderBy | None = None
     limit: int | None = None
+    score_alias: str | None = None
+    # Alias de COSINE_SCORE(); también aparece en projection.
 
 
 @dataclass(frozen=True)

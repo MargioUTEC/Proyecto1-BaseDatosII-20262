@@ -172,6 +172,37 @@ class RTreeWindowScan(PlanNode):
 
 
 @dataclass
+class TextSearch(PlanNode):
+    # MATCH: InvertedIndexScan o FullTextScan. Emite filas ordenadas por coseno y deja
+    # el puntaje de cada RID en `scores` para COSINE_SCORE().
+
+    table: str = ""
+    index: str | None = None
+    column: str = ""
+    query: str = ""
+    parsed: str = ""
+    top_k: int | None = None
+    ascending: bool = False
+    language: str | None = None
+    strategy: str = ""
+    scores: dict = field(default_factory=dict)
+
+    @property
+    def label(self) -> str:
+        return "InvertedIndexScan" if self.index else "FullTextScan"
+
+    def details(self) -> dict:
+        detail = {"table": self.table, "index": self.index, "column": self.column,
+                  "match": self.query, "terms": self.parsed,
+                  "ranking": "TF-IDF coseno " + ("ASC" if self.ascending else "DESC")}
+        if self.top_k is not None:
+            detail["top_k"] = self.top_k
+        if self.strategy:
+            detail["strategy"] = self.strategy
+        return detail
+
+
+@dataclass
 class SequentialSearch(PlanNode):
     """Binary search over the ordered area of a Sequential File."""
 
@@ -230,6 +261,8 @@ class Filter(PlanNode):
 class Project(PlanNode):
     child: PlanNode | None = None
     columns: tuple[str, ...] = ()
+    score_alias: str | None = None
+    score_source: PlanNode | None = None
 
     @property
     def label(self) -> str:

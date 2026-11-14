@@ -141,7 +141,7 @@ class BulkLoader:
                     else:
                         key = record[index_positions[meta.name]]
                     self._indexes.insert(meta.name, key, rid)
-                    if meta.kind is IndexKind.RTREE:
+                    if meta.kind in (IndexKind.RTREE, IndexKind.INVERTED):
                         continue
                     bucket = distinct[meta.column.lower()]
                     if meta.column.lower() not in overflowed:

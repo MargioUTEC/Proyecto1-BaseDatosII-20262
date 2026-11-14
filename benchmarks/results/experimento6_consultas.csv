@@ -1,0 +1,181 @@
+system,method,op,len,query,rows,index_reads,table_reads,total_reads,ms,block_bytes
+motor,FullTextScan,AND,1,registro,12785,0,6666,6666,5193.594599999869,4096
+motor,FullTextScan,AND,1,falla,1481,0,6666,6666,4647.196199999598,4096
+motor,FullTextScan,AND,1,horario,4681,0,6666,6666,4900.14599999995,4096
+motor,FullTextScan,AND,1,recepción,2205,0,6666,6666,10052.641299999777,4096
+motor,FullTextScan,AND,1,rostro,8348,0,6666,6666,15391.356800000267,4096
+motor,FullTextScan,OR,1,turno,11518,0,6666,6666,15393.011199999819,4096
+motor,FullTextScan,OR,1,sospechoso,25,0,6666,6666,14982.33719999962,4096
+motor,FullTextScan,OR,1,alarma,858,0,6666,6666,13566.046199999619,4096
+motor,FullTextScan,OR,1,andamio,2,0,6666,6666,8695.80730000007,4096
+motor,FullTextScan,OR,1,proyector,16,0,6666,6666,7801.194299999679,4096
+motor,FullTextScan,AND-NOT,1,NOT grabaciones,18301,0,6666,6666,5742.382199999611,4096
+motor,FullTextScan,AND-NOT,1,NOT candado,19993,0,6666,6666,5413.419799999701,4096
+motor,FullTextScan,AND-NOT,1,NOT consentimiento,19434,0,6666,6666,8089.669299999969,4096
+motor,FullTextScan,AND-NOT,1,NOT verificación,14754,0,6666,6666,6689.6357000000535,4096
+motor,FullTextScan,AND-NOT,1,NOT acceso,11063,0,6666,6666,15392.214599999534,4096
+motor,FullTextScan,TOP-K,1,acceso,10,0,6666,6666,15805.69639999976,4096
+motor,FullTextScan,TOP-K,1,sede,10,0,6666,6666,11931.728300000032,4096
+motor,FullTextScan,TOP-K,1,permisos,10,0,6666,6666,5416.231400000015,4096
+motor,FullTextScan,TOP-K,1,cámara,10,0,6666,6666,5667.769800000315,4096
+motor,FullTextScan,TOP-K,1,bitácora,10,0,6666,6666,5355.505300000004,4096
+motor,FullTextScan,AND,3,credencial AND grabaciones AND falla,3,0,6666,6666,5171.95270000002,4096
+motor,FullTextScan,AND,3,ingreso AND visitante AND grabaciones,38,0,6666,6666,5469.709800000601,4096
+motor,FullTextScan,AND,3,duplicado AND verificación AND recepción,5,0,6666,6666,5191.59639999998,4096
+motor,FullTextScan,AND,3,seguridad AND técnico AND credencial,78,0,6666,6666,5379.802600000403,4096
+motor,FullTextScan,AND,3,sospechoso AND paraguas AND servidor,0,0,6666,6666,5186.4849999997205,4096
+motor,FullTextScan,OR,3,permisos OR falla OR turno,12398,0,6666,6666,5458.106199999747,4096
+motor,FullTextScan,OR,3,andamio OR bitácora OR rostro,9485,0,6666,6666,5448.9981000001535,4096
+motor,FullTextScan,OR,3,recepción OR horario OR iluminación,6307,0,6666,6666,5526.904499999546,4096
+motor,FullTextScan,OR,3,permisos OR credencial OR auditoría,10792,0,6666,6666,5345.947899999828,4096
+motor,FullTextScan,OR,3,termo OR proyector OR duplicado,1368,0,6666,6666,5170.441099999607,4096
+motor,FullTextScan,AND-NOT,3,sede AND permisos AND NOT horario,624,0,6666,6666,5536.947099999907,4096
+motor,FullTextScan,AND-NOT,3,grabaciones AND visitante AND NOT laptop,132,0,6666,6666,4865.8188000003975,4096
+motor,FullTextScan,AND-NOT,3,auditoría AND alarma AND NOT extraviado,75,0,6666,6666,5216.21339999956,4096
+motor,FullTextScan,AND-NOT,3,técnico AND recepción AND NOT mochila,89,0,6666,6666,5264.169399999901,4096
+motor,FullTextScan,AND-NOT,3,rostro AND andamio AND NOT turno,0,0,6666,6666,5104.453100000228,4096
+motor,FullTextScan,TOP-K,3,ingreso mochila rostro,10,0,6666,6666,5604.953200000182,4096
+motor,FullTextScan,TOP-K,3,permisos mascarilla turno,10,0,6666,6666,5514.789400000154,4096
+motor,FullTextScan,TOP-K,3,técnico seguridad registro,10,0,6666,6666,5725.760500000433,4096
+motor,FullTextScan,TOP-K,3,falla mascarilla extintor,10,0,6666,6666,5286.17309999936,4096
+motor,FullTextScan,TOP-K,3,visitante sospechoso auditoría,10,0,6666,6666,5147.024599999895,4096
+motor,FullTextScan,AND,5,bitácora AND proyector AND horario AND técnico AND auditoría,0,0,6666,6666,5325.549699999101,4096
+motor,FullTextScan,AND,5,servidor AND registro AND mantenimiento AND credencial AND sede,7,0,6666,6666,5181.225800000902,4096
+motor,FullTextScan,AND,5,seguridad AND falla AND mochila AND grabaciones AND horario,0,0,6666,6666,5023.330800000622,4096
+motor,FullTextScan,AND,5,registro AND auditoría AND grabaciones AND iluminación AND recepción,0,0,6666,6666,5358.817199999976,4096
+motor,FullTextScan,AND,5,duplicado AND servidor AND sospechoso AND sede AND falla,0,0,6666,6666,5582.9478999994535,4096
+motor,FullTextScan,OR,5,falla OR cámara OR consentimiento OR recepción OR auditoría,13367,0,6666,6666,5947.162199999184,4096
+motor,FullTextScan,OR,5,bitácora OR rostro OR permisos OR técnico OR turno,15830,0,6666,6666,15049.945200000366,4096
+motor,FullTextScan,OR,5,mantenimiento OR duplicado OR recepción OR cámara OR sede,15895,0,6666,6666,11631.637100001171,4096
+motor,FullTextScan,OR,5,mantenimiento OR turno OR bitácora OR credencial OR acceso,16808,0,6666,6666,9568.092599999545,4096
+motor,FullTextScan,OR,5,bitácora OR termo OR extintor OR acceso OR registro,15246,0,6666,6666,5622.919600000387,4096
+motor,FullTextScan,AND-NOT,5,biométrica AND registro AND extintor AND mantenimiento AND NOT duplicado,0,0,6666,6666,5981.7336000005525,4096
+motor,FullTextScan,AND-NOT,5,seguridad AND acceso AND falla AND termo AND NOT andamio,1,0,6666,6666,11002.774599999611,4096
+motor,FullTextScan,AND-NOT,5,grabaciones AND fotografía AND extintor AND turno AND NOT mascarilla,0,0,6666,6666,16514.681500000734,4096
+motor,FullTextScan,AND-NOT,5,candado AND ingreso AND horario AND servidor AND NOT acceso,0,0,6666,6666,16254.787400000168,4096
+motor,FullTextScan,AND-NOT,5,alarma AND acceso AND fotografía AND candado AND NOT bitácora,0,0,6666,6666,6888.702100000046,4096
+motor,FullTextScan,TOP-K,5,horario mantenimiento biométrica seguridad mochila,10,0,6666,6666,17155.17500000078,4096
+motor,FullTextScan,TOP-K,5,registro verificación credencial rostro biométrica,10,0,6666,6666,16913.39919999882,4096
+motor,FullTextScan,TOP-K,5,seguridad ingreso grabaciones duplicado rostro,10,0,6666,6666,12500.646699999379,4096
+motor,FullTextScan,TOP-K,5,rostro recepción mascarilla iluminación consentimiento,10,0,6666,6666,16664.88560000016,4096
+motor,FullTextScan,TOP-K,5,bitácora iluminación registro duplicado andamio,10,0,6666,6666,17032.852899999853,4096
+motor,InvertedIndexScan,AND,1,registro,12785,126,12783,12909,9755.308700000569,4096
+motor,InvertedIndexScan,AND,1,falla,1481,102,1481,1583,1197.6471000007223,4096
+motor,InvertedIndexScan,AND,1,horario,4681,111,4681,4792,3690.958299999693,4096
+motor,InvertedIndexScan,AND,1,recepción,2205,105,2205,2310,1728.3173000005263,4096
+motor,InvertedIndexScan,AND,1,rostro,8348,117,8346,8463,6200.550399999884,4096
+motor,InvertedIndexScan,OR,1,turno,11518,123,11518,11641,8331.201599999986,4096
+motor,InvertedIndexScan,OR,1,sospechoso,25,22,25,47,18.626600000061444,4096
+motor,InvertedIndexScan,OR,1,alarma,858,103,858,961,639.0521000012086,4096
+motor,InvertedIndexScan,OR,1,andamio,2,4,2,6,2.771700000266719,4096
+motor,InvertedIndexScan,OR,1,proyector,16,17,16,33,11.63879999967321,4096
+motor,InvertedIndexScan,AND-NOT,1,NOT grabaciones,18301,104,18300,18404,13894.115000000056,4096
+motor,InvertedIndexScan,AND-NOT,1,NOT candado,19993,101,19991,20092,14982.815699999264,4096
+motor,InvertedIndexScan,AND-NOT,1,NOT consentimiento,19434,102,19432,19534,11713.719399999718,4096
+motor,InvertedIndexScan,AND-NOT,1,NOT verificación,14754,111,14753,14864,3642.5415999992765,4096
+motor,InvertedIndexScan,AND-NOT,1,NOT acceso,11063,118,11061,11179,2697.1335000007457,4096
+motor,InvertedIndexScan,TOP-K,1,acceso,10,118,10,128,19.135699999424105,4096
+motor,InvertedIndexScan,TOP-K,1,sede,10,118,10,128,18.893800000114425,4096
+motor,InvertedIndexScan,TOP-K,1,permisos,10,103,10,113,4.326399999627029,4096
+motor,InvertedIndexScan,TOP-K,1,cámara,10,123,10,133,23.520299999290728,4096
+motor,InvertedIndexScan,TOP-K,1,bitácora,10,104,10,114,4.880399999819929,4096
+motor,InvertedIndexScan,AND,3,credencial AND grabaciones AND falla,3,30,3,33,7.104799999069655,4096
+motor,InvertedIndexScan,AND,3,ingreso AND visitante AND grabaciones,38,61,38,99,14.777800000956631,4096
+motor,InvertedIndexScan,AND,3,duplicado AND verificación AND recepción,5,28,5,33,5.621899999823654,4096
+motor,InvertedIndexScan,AND,3,seguridad AND técnico AND credencial,78,90,78,168,22.93650000137859,4096
+motor,InvertedIndexScan,AND,3,sospechoso AND paraguas AND servidor,0,15,0,15,2.6157000011153286,4096
+motor,InvertedIndexScan,OR,3,permisos OR falla OR turno,12398,131,12398,12529,3050.49439999857,4096
+motor,InvertedIndexScan,OR,3,andamio OR bitácora OR rostro,9485,123,9483,9606,2515.059299999848,4096
+motor,InvertedIndexScan,OR,3,recepción OR horario OR iluminación,6307,119,6307,6426,1483.4226000002673,4096
+motor,InvertedIndexScan,OR,3,permisos OR credencial OR auditoría,10792,128,10792,10920,2646.030800000517,4096
+motor,InvertedIndexScan,OR,3,termo OR proyector OR duplicado,1368,106,1368,1474,304.38889999913954,4096
+motor,InvertedIndexScan,AND-NOT,3,sede AND permisos AND NOT horario,624,134,624,758,130.57129999924655,4096
+motor,InvertedIndexScan,AND-NOT,3,grabaciones AND visitante AND NOT laptop,132,87,132,219,29.87459999985731,4096
+motor,InvertedIndexScan,AND-NOT,3,auditoría AND alarma AND NOT extraviado,75,68,75,143,17.615099999602535,4096
+motor,InvertedIndexScan,AND-NOT,3,técnico AND recepción AND NOT mochila,89,94,89,183,23.669000000154483,4096
+motor,InvertedIndexScan,AND-NOT,3,rostro AND andamio AND NOT turno,0,44,0,44,6.677100001070357,4096
+motor,InvertedIndexScan,TOP-K,3,ingreso mochila rostro,10,154,10,164,36.09110000070359,4096
+motor,InvertedIndexScan,TOP-K,3,permisos mascarilla turno,10,130,10,140,32.27969999989,4096
+motor,InvertedIndexScan,TOP-K,3,técnico seguridad registro,10,141,10,151,38.22740000032354,4096
+motor,InvertedIndexScan,TOP-K,3,falla mascarilla extintor,10,106,10,116,6.281899999521556,4096
+motor,InvertedIndexScan,TOP-K,3,visitante sospechoso auditoría,10,115,10,125,12.594800000442774,4096
+motor,InvertedIndexScan,AND,5,bitácora AND proyector AND horario AND técnico AND auditoría,0,29,0,29,3.1931000003169174,4096
+motor,InvertedIndexScan,AND,5,servidor AND registro AND mantenimiento AND credencial AND sede,7,81,7,88,21.91080000011425,4096
+motor,InvertedIndexScan,AND,5,seguridad AND falla AND mochila AND grabaciones AND horario,0,50,0,50,10.295100000803359,4096
+motor,InvertedIndexScan,AND,5,registro AND auditoría AND grabaciones AND iluminación AND recepción,0,45,0,45,9.374500000376429,4096
+motor,InvertedIndexScan,AND,5,duplicado AND servidor AND sospechoso AND sede AND falla,0,35,0,35,4.6764999997321866,4096
+motor,InvertedIndexScan,OR,5,falla OR cámara OR consentimiento OR recepción OR auditoría,13367,142,13366,13508,3159.543800001302,4096
+motor,InvertedIndexScan,OR,5,bitácora OR rostro OR permisos OR técnico OR turno,15830,155,15828,15983,3738.862999999583,4096
+motor,InvertedIndexScan,OR,5,mantenimiento OR duplicado OR recepción OR cámara OR sede,15895,157,15894,16051,4064.3622999996296,4096
+motor,InvertedIndexScan,OR,5,mantenimiento OR turno OR bitácora OR credencial OR acceso,16808,170,16807,16977,3646.750000000793,4096
+motor,InvertedIndexScan,OR,5,bitácora OR termo OR extintor OR acceso OR registro,15246,153,15244,15397,2320.4945000006774,4096
+motor,InvertedIndexScan,AND-NOT,5,biométrica AND registro AND extintor AND mantenimiento AND NOT duplicado,0,49,0,49,7.791500000166707,4096
+motor,InvertedIndexScan,AND-NOT,5,seguridad AND acceso AND falla AND termo AND NOT andamio,1,38,1,39,6.714200000715209,4096
+motor,InvertedIndexScan,AND-NOT,5,grabaciones AND fotografía AND extintor AND turno AND NOT mascarilla,0,44,0,44,5.551999999624968,4096
+motor,InvertedIndexScan,AND-NOT,5,candado AND ingreso AND horario AND servidor AND NOT acceso,0,55,0,55,5.6047000007311,4096
+motor,InvertedIndexScan,AND-NOT,5,alarma AND acceso AND fotografía AND candado AND NOT bitácora,0,39,0,39,5.448999999316584,4096
+motor,InvertedIndexScan,TOP-K,5,horario mantenimiento biométrica seguridad mochila,10,157,10,167,28.808000000026368,4096
+motor,InvertedIndexScan,TOP-K,5,registro verificación credencial rostro biométrica,10,185,10,195,78.16309999998339,4096
+motor,InvertedIndexScan,TOP-K,5,seguridad ingreso grabaciones duplicado rostro,10,152,10,162,26.67230000042764,4096
+motor,InvertedIndexScan,TOP-K,5,rostro recepción mascarilla iluminación consentimiento,10,131,10,141,17.858799999885377,4096
+motor,InvertedIndexScan,TOP-K,5,bitácora iluminación registro duplicado andamio,10,138,10,148,21.951499999886437,4096
+postgres,GIN,AND,1,registro,12785.0,,,2688,12.01,8192
+postgres,GIN,AND,1,falla,1481.0,,,1167,0.645,8192
+postgres,GIN,AND,1,horario,4681.0,,,2281,1.747,8192
+postgres,GIN,AND,1,recepción,2205.0,,,1538,0.935,8192
+postgres,GIN,AND,1,rostro,8348.0,,,2599,2.92,8192
+postgres,GIN,OR,1,turno,11518.0,,,2688,12.87,8192
+postgres,GIN,OR,1,sospechoso,25.0,,,28,0.102,8192
+postgres,GIN,OR,1,alarma,858.0,,,752,0.456,8192
+postgres,GIN,OR,1,andamio,2.0,,,5,0.015,8192
+postgres,GIN,OR,1,proyector,16.0,,,19,0.024,8192
+postgres,GIN,AND-NOT,1,!grabaciones,18301.0,,,2688,15.495,8192
+postgres,GIN,AND-NOT,1,!candado,19993.0,,,2688,8.888,8192
+postgres,GIN,AND-NOT,1,!consentimiento,19434.0,,,2688,9.812,8192
+postgres,GIN,AND-NOT,1,!verificación,15975.0,,,2688,13.099,8192
+postgres,GIN,AND-NOT,1,!acceso,11063.0,,,2688,11.908,8192
+postgres,GIN,TOP-K,1,acceso,10.0,,,2622,11.675,8192
+postgres,GIN,TOP-K,1,sede,10.0,,,2611,13.597,8192
+postgres,GIN,TOP-K,1,permisos,10.0,,,748,0.688,8192
+postgres,GIN,TOP-K,1,cámara,10.0,,,2640,13.108,8192
+postgres,GIN,TOP-K,1,bitácora,10.0,,,1045,1.259,8192
+postgres,GIN,AND,3,credencial & grabaciones & falla,3.0,,,15,0.21,8192
+postgres,GIN,AND,3,ingreso & visitante & grabaciones,38.0,,,52,0.291,8192
+postgres,GIN,AND,3,duplicado & verificación & recepción,4.0,,,13,0.197,8192
+postgres,GIN,AND,3,seguridad & técnico & credencial,78.0,,,88,0.29,8192
+postgres,GIN,AND,3,sospechoso & paraguas & servidor,0.0,,,9,0.064,8192
+postgres,GIN,OR,3,permisos | falla | turno,12398.0,,,2688,9.256,8192
+postgres,GIN,OR,3,andamio | bitácora | rostro,9485.0,,,2629,3.483,8192
+postgres,GIN,OR,3,recepción | horario | iluminación,6307.0,,,2503,2.487,8192
+postgres,GIN,OR,3,permisos | credencial | auditoría,10364.0,,,2688,13.332,8192
+postgres,GIN,OR,3,termo | proyector | duplicado,1368.0,,,1093,0.745,8192
+postgres,GIN,AND-NOT,3,sede & permisos & !horario,624.0,,,569,0.48,8192
+postgres,GIN,AND-NOT,3,grabaciones & visitante & !laptop,132.0,,,137,0.242,8192
+postgres,GIN,AND-NOT,3,auditoría & alarma & !extraviado,16.0,,,25,0.104,8192
+postgres,GIN,AND-NOT,3,técnico & recepción & !mochila,89.0,,,101,0.245,8192
+postgres,GIN,AND-NOT,3,rostro & andamio & !turno,0.0,,,15,0.099,8192
+postgres,GIN,TOP-K,3,ingreso | mochila | rostro,10.0,,,2688,27.908,8192
+postgres,GIN,TOP-K,3,permisos | mascarilla | turno,10.0,,,2688,26.179,8192
+postgres,GIN,TOP-K,3,técnico | seguridad | registro,10.0,,,2688,32.12,8192
+postgres,GIN,TOP-K,3,falla | mascarilla | extintor,10.0,,,1410,4.625,8192
+postgres,GIN,TOP-K,3,visitante | sospechoso | auditoría,10.0,,,2249,11.972,8192
+postgres,GIN,AND,5,bitácora & proyector & horario & técnico & auditoría,0.0,,,12,0.234,8192
+postgres,GIN,AND,5,servidor & registro & mantenimiento & credencial & sede,7.0,,,31,0.889,8192
+postgres,GIN,AND,5,seguridad & falla & mochila & grabaciones & horario,0.0,,,18,0.62,8192
+postgres,GIN,AND,5,registro & auditoría & grabaciones & iluminación & recepción,0.0,,,18,0.181,8192
+postgres,GIN,AND,5,duplicado & servidor & sospechoso & sede & falla,0.0,,,16,0.193,8192
+postgres,GIN,OR,5,falla | cámara | consentimiento | recepción | auditoría,13071.0,,,2688,24.029,8192
+postgres,GIN,OR,5,bitácora | rostro | permisos | técnico | turno,15830.0,,,2688,20.18,8192
+postgres,GIN,OR,5,mantenimiento | duplicado | recepción | cámara | sede,15895.0,,,2688,24.099,8192
+postgres,GIN,OR,5,mantenimiento | turno | bitácora | credencial | acceso,16808.0,,,2688,10.58,8192
+postgres,GIN,OR,5,bitácora | termo | extintor | acceso | registro,15246.0,,,2688,25.724,8192
+postgres,GIN,AND-NOT,5,biométrica & registro & extintor & mantenimiento & !duplicado,0.0,,,16,0.118,8192
+postgres,GIN,AND-NOT,5,seguridad & acceso & falla & termo & !andamio,1.0,,,17,0.106,8192
+postgres,GIN,AND-NOT,5,grabaciones & fotografía & extintor & turno & !mascarilla,0.0,,,17,0.118,8192
+postgres,GIN,AND-NOT,5,candado & ingreso & horario & servidor & !acceso,0.0,,,19,0.125,8192
+postgres,GIN,AND-NOT,5,alarma & acceso & fotografía & candado & !bitácora,0.0,,,16,0.094,8192
+postgres,GIN,TOP-K,5,horario | mantenimiento | biométrica | seguridad | mochila,10.0,,,2688,41.445,8192
+postgres,GIN,TOP-K,5,registro | verificación | credencial | rostro | biométrica,10.0,,,2688,29.772,8192
+postgres,GIN,TOP-K,5,seguridad | ingreso | grabaciones | duplicado | rostro,10.0,,,2688,39.487,8192
+postgres,GIN,TOP-K,5,rostro | recepción | mascarilla | iluminación | consentimiento,10.0,,,2688,37.953,8192
+postgres,GIN,TOP-K,5,bitácora | iluminación | registro | duplicado | andamio,10.0,,,2688,38.303,8192

@@ -19,6 +19,7 @@ from ..sql.ast import (
     Literal,
     Logical,
     LogicalOp,
+    Match,
     Not,
 )
 
@@ -79,6 +80,10 @@ def evaluate(expression: Expression, row: tuple, positions: dict[str, int]):
     if isinstance(expression, IsNull):
         value = evaluate(expression.operand, row, positions)
         return (value is not None) if expression.negated else (value is None)
+    if isinstance(expression, Match):
+        from ..textsearch import row_matches
+
+        return row_matches(expression.query, evaluate(ColumnRef(expression.column), row, positions))
     raise PlannerError(f"no se puede evaluar {type(expression).__name__}")
 
 

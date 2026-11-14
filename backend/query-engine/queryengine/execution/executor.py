@@ -30,6 +30,7 @@ from ..planner.plan import (
     SequentialRangeScan,
     SequentialSearch,
     Sort,
+    TextSearch,
 )
 from ..storage.port import RID, IndexManager, Record, StorageEngine
 from ..spatial import parse_point
@@ -57,6 +58,8 @@ class Executor:
             return self._spatial_knn(node, schema)
         if isinstance(node, RTreeWindowScan):
             return self._spatial_window(node, schema)
+        if isinstance(node, TextSearch):
+            return self._text_search(node, schema)
         if isinstance(node, SequentialSearch):
             return iter(self._storage.search_key(node.table, node.key))
         if isinstance(node, SequentialRangeScan):
@@ -212,6 +215,74 @@ class Executor:
                         "index_ms": round(index_ms, 4), "table_ms": round(table_ms, 4)}
         return iter(output)
 
+    def _text_search(self, node: TextSearch, schema: TableSchema) -> Iterator[Tuple]:
+        # MATCH: con índice, RIDs ya rankeados + fetch (fila borrada -> None, se descarta);
+        # sin índice, Full Text Scan que analiza cada texto con la misma fórmula.
+        from ..textsearch import analyzer, textual
+
+        io = self._indexes.io
+        position = schema.index_of(node.column)
+        output: list[Tuple] = []
+        scores: dict = {}
+        index_reads = index_writes = 0
+        index_ms = 0.0
+        breakdown: dict = {}
+        candidates = 0
+        table_before = (io.disk_reads, io.disk_writes)
+        table_started = time.perf_counter()
+        if node.index:
+            top_k = node.top_k
+            seen: set = set()
+            while True:
+                before = (io.disk_reads, io.disk_writes)
+                started = time.perf_counter()
+                result = self._indexes.text_search(node.index, node.query, top_k)
+                index_ms += (time.perf_counter() - started) * 1000
+                index_reads += io.disk_reads - before[0]
+                index_writes += io.disk_writes - before[1]
+                breakdown = result.breakdown
+                candidates = result.candidates
+                for hit in result.hits:
+                    rid = hit.key
+                    if rid in seen:
+                        continue
+                    seen.add(rid)
+                    record = self._storage.fetch(node.table, rid)
+                    if record is None:
+                        continue
+                    output.append((rid, record))
+                    scores[rid] = hit.score
+                    if top_k is not None and len(output) == top_k:
+                        break
+                complete = (top_k is None or len(output) >= top_k
+                            or len(result.hits) >= result.candidates)
+                if complete:
+                    break
+                top_k = None  # habia filas borradas entre los K primeros: rankear todo
+        else:
+            texts, records = [], {}
+            for rid, record in self._storage.scan(node.table):
+                texts.append((rid, record[position]))
+                records[rid] = record
+            hits = textual().full_text_scan(texts, node.query, analyzer(node.language),
+                                            node.top_k)
+            candidates = len(texts)
+            for hit in hits:
+                output.append((hit.key, records[hit.key]))
+                scores[hit.key] = hit.score
+        if node.ascending:
+            output.reverse()
+        table_ms = (time.perf_counter() - table_started) * 1000 - index_ms
+        table_reads = io.disk_reads - table_before[0] - index_reads
+        table_writes = io.disk_writes - table_before[1] - index_writes
+        node.scores = scores
+        node.runtime = {"index_reads": index_reads, "index_writes": index_writes,
+                        "table_reads": table_reads, "table_writes": table_writes,
+                        "index_ms": round(index_ms, 4), "table_ms": round(table_ms, 4),
+                        "candidates": candidates, "returned": len(output),
+                        "index_breakdown": breakdown}
+        return iter(output)
+
     def _index_scan(self, node: IndexScan) -> Iterator[Tuple]:
         for rid in self._indexes.search(node.index, node.key):
             record = self._storage.fetch(node.table, rid)
@@ -266,9 +337,13 @@ class Executor:
                 return
 
     def _project(self, node: Project, schema: TableSchema) -> Iterator[Tuple]:
-        positions = [schema.index_of(name) for name in node.columns]
+        alias = node.score_alias
+        positions = [None if alias is not None and name == alias else schema.index_of(name)
+                     for name in node.columns]
         for rid, record in self.execute(node.child, schema):
-            yield rid, tuple(record[index] for index in positions)
+            scores = node.score_source.scores if node.score_source is not None else {}
+            yield rid, tuple(round(scores.get(rid, 0.0), 6) if index is None else record[index]
+                             for index in positions)
 
 
 def _positions(schema: TableSchema) -> dict[str, int]:

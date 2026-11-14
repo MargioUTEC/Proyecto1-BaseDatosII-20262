@@ -100,6 +100,12 @@ class RoutingIndexStore:
     def entry_count(self, name: str) -> int:
         return self._route(name).entry_count(name)
 
+    def text_search(self, name: str, query: str, top_k: int | None):
+        return self._route(name).text_search(name, query, top_k)
+
+    def describe_index(self, name: str) -> dict:
+        return self._route(name).describe_index(name)
+
     def describe(self) -> dict[str, str]:
         """Where each index lives, for the catalog listing and the report."""
         return dict(self._reasons)

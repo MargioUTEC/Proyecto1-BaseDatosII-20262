@@ -13,10 +13,10 @@
 
   // Mismo vocabulario que queryengine/sql/tokens.py
   var CLAVES = ("AND AS ASC BETWEEN BY COPY CREATE DELETE DELIMITER DESC DROP EXPLAIN FALSE FROM " +
-    "HEADER INDEX INSERT INTO IS KEY LIMIT NOT NULL ON OR ORDER PRIMARY SELECT TABLE TRUE " +
+    "HEADER INDEX INSERT INTO IS KEY LIMIT MATCH NOT NULL ON OR ORDER PRIMARY SELECT TABLE TRUE " +
     "USING VALUES WHERE WITH").split(" ");
   var TIPOS = ("INT BIGINT FLOAT DOUBLE BOOL CHAR VARCHAR DATE HEAP SEQUENTIAL BTREE HASH RTREE " +
-    "PAGE_SIZE").split(" ");
+    "INVERTED PAGE_SIZE COSINE_SCORE").split(" ");
 
   var RECETAS = [
     ["Crear la tabla de clientes", [
@@ -34,6 +34,21 @@
     ["Busqueda por rango", 'SELECT "Index", "City", "Country"\n  FROM customers\n WHERE "Index" BETWEEN 5000 AND 5020;'],
     ["Rango amplio (vuelve a SeqScan)", 'SELECT "Index" FROM customers WHERE "Index" >= 1 AND "Index" <= 60000;'],
     ["Ver el plan sin ejecutar", 'EXPLAIN SELECT * FROM customers WHERE "Index" = 42;'],
+    ["Texto: tabla de expedientes", [
+      'CREATE TABLE expedientes (',
+      '  id INT PRIMARY KEY, persona_id INT, tipo CHAR(32),',
+      '  sede CHAR(24), fecha DATE, cuerpo VARCHAR(1000)',
+      ') USING HEAP;'
+    ].join("\n")],
+    ["Texto: cargar expedientes", "COPY expedientes FROM 'expedientes.csv';"],
+    ["Texto: indice invertido (SPIMI)",
+      "CREATE INDEX ix_cuerpo ON expedientes(cuerpo) USING INVERTED\n  WITH (scoring = 'TFIDF_COSINE', language = 'spanish');"],
+    ["Texto: Top-K por coseno",
+      "SELECT id, tipo, sede, COSINE_SCORE() AS relevancia\n  FROM expedientes\n WHERE cuerpo MATCH 'camara falla iluminacion'\n ORDER BY relevancia DESC LIMIT 10;"],
+    ["Texto: booleana AND / AND NOT",
+      "SELECT id, tipo FROM expedientes\n WHERE cuerpo MATCH 'verificacion AND rostro AND NOT mascarilla';"],
+    ["Texto: hibrida (post-filtering)",
+      "SELECT id, sede, COSINE_SCORE() AS relevancia\n  FROM expedientes\n WHERE cuerpo MATCH 'credencial vencida' AND sede = 'Miraflores'\n ORDER BY relevancia DESC LIMIT 5;"],
     ["Tabla ordenada con overflow", [
       'CREATE TABLE clientes_ord (',
       '  "Index" INT PRIMARY KEY, "Customer Id" CHAR(15), "First Name" CHAR(16),',

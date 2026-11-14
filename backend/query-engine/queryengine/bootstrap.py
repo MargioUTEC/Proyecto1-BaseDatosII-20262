@@ -76,6 +76,7 @@ def build_engine(settings: Settings | None = None) -> QueryEngine:
     engine = QueryEngine(catalog, storage, indexes, io, settings.data_dir)
     _reopen_existing_tables(engine, storage)
     _reopen_spatial_indexes(engine, indexes, storage)
+    _reopen_inverted_indexes(engine, indexes, storage)
     return engine
 
 
@@ -91,6 +92,11 @@ def _index_backend(io: IOCounter, settings: Settings, layer):
     from .storage.diskrtree import DiskRTreeIndex
 
     candidates.append(("R-Tree paginado en disco", DiskRTreeIndex(io, settings.table_dir)))
+    from .storage.diskinverted import DiskInvertedIndex
+
+    candidates.append(
+        ("indice invertido en disco (SPIMI)", DiskInvertedIndex(io, settings.table_dir))
+    )
     if layer is not None and layer.BPlusTree is not None:
         from .storage.diskindex import DiskIndexStore
 
@@ -110,6 +116,21 @@ def _reopen_existing_tables(engine: QueryEngine, storage) -> None:
     """Let the storage backend re-attach to tables the catalog already knows."""
     for schema in engine.catalog.tables():
         storage.create_table(schema)
+
+
+def _reopen_inverted_indexes(engine: QueryEngine, indexes, storage) -> None:
+    # Reabre los índices invertidos; si tienen menos documentos que la tabla, los reconstruye.
+    for schema in engine.catalog.tables():
+        for meta in engine.catalog.indexes_on(schema.name):
+            if meta.kind.value != "INVERTED":
+                continue
+            indexes.reopen_index(meta, schema)
+            live = sum(1 for _ in storage.scan(schema.name))
+            if indexes.entry_count(meta.name) != live:
+                position = schema.index_of(meta.column)
+                indexes.bulk_load(meta.name, (
+                    (record[position], rid) for rid, record in storage.scan(schema.name)
+                ))
 
 
 def _reopen_spatial_indexes(engine: QueryEngine, indexes, storage) -> None:

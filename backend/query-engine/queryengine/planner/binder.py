@@ -18,6 +18,7 @@ from ..sql.ast import (
     IsNull,
     Literal,
     Logical,
+    Match,
     Not,
 )
 
@@ -49,6 +50,11 @@ def bind_expression(expression: Expression | None, schema: TableSchema) -> Expre
         return IsNull(ColumnRef(column.name), expression.negated)
     if isinstance(expression, ColumnRef):
         return ColumnRef(schema.column(expression.name).name)
+    if isinstance(expression, Match):
+        column = schema.column(expression.column)
+        if not column.type.is_text:
+            raise CatalogError(f"MATCH requiere una columna de texto y '{column.name}' es {column.type}")
+        return Match(column.name, expression.query)
     return expression
 
 

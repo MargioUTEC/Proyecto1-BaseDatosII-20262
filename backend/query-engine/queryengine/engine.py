@@ -168,6 +168,7 @@ class QueryEngine:
                             "column": meta.column,
                             "kind": meta.kind.value,
                             "backend": routes.get(meta.name.lower(), "sustituto en memoria"),
+                            **({"options": dict(meta.options)} if meta.options else {}),
                         }
                         for meta in self._catalog.indexes_on(schema.name)
                     ],
@@ -261,6 +262,16 @@ class QueryEngine:
             "plan": plan.explain(),
             "metrics": metrics,
         }
+
+    def text_index(self, name: str) -> dict:
+        # Páginas y tamaños de un índice invertido (para la demo).
+        meta = next((m for schema in self._catalog.tables()
+                     for m in self._catalog.indexes_on(schema.name)
+                     if m.name.lower() == name.lower()), None)
+        if meta is None or meta.kind is not IndexKind.INVERTED:
+            raise CatalogError(f"'{name}' no es un indice INVERTED")
+        return {"index": meta.name, "table": meta.table, "column": meta.column,
+                **self._indexes.describe_index(meta.name)}
 
     def reorganize(self, table: str) -> dict:
         schema = self._catalog.table(table)
@@ -364,12 +375,22 @@ class QueryEngine:
         if statement.kind == "RTREE":
             if column.type.kind.value not in ("CHAR", "VARCHAR"):
                 raise CatalogError("la columna RTREE debe almacenar POINT(lon lat) en CHAR/VARCHAR")
+        if statement.kind == "INVERTED" and column.type.kind.value not in ("CHAR", "VARCHAR"):
+            raise CatalogError("un indice INVERTED necesita una columna CHAR o VARCHAR")
+        if statement.options and statement.kind != "INVERTED":
+            raise CatalogError(f"el indice {statement.kind} no admite opciones WITH (...)")
         meta = IndexMeta(
             name=statement.name,
             table=schema.name,
             column=column.name,
             kind=IndexKind(statement.kind),
+            options=tuple((key, value.upper() if key == "scoring" else value)
+                          for key, value in statement.options),
         )
+        if meta.kind is IndexKind.INVERTED:
+            from .storage.diskinverted import DiskInvertedIndex
+
+            DiskInvertedIndex.validate_options(meta)
         self._catalog.create_index(meta)
         try:
             self._indexes.create_index(meta, schema)
@@ -382,7 +403,11 @@ class QueryEngine:
                     if key is None:
                         continue
                     key = _spatial_key(key)
-                keys.add(key)
+                if meta.kind is IndexKind.INVERTED:
+                    if key is None:
+                        continue
+                else:
+                    keys.add(key)
                 entries.append((key, rid))
             self._indexes.bulk_load(meta.name, entries)
         except Exception:
@@ -390,20 +415,22 @@ class QueryEngine:
             self._indexes.drop_index(meta.name)
             raise
         if entries:
-            if meta.kind is not IndexKind.RTREE:
+            if meta.kind not in (IndexKind.RTREE, IndexKind.INVERTED):
                 self._catalog.set_distinct(schema.name, column.name, len(keys))
                 comparable = [key for key in keys if key is not None]
                 if comparable:
                     self._catalog.set_bounds(schema.name, column.name, min(comparable), max(comparable))
-        return QueryResult(
-            statement="CreateIndex",
-            affected_rows=len(entries),
-            message=(
-                f"indice {meta.kind.value} '{meta.name}' creado sobre "
-                f"{schema.name}({column.name}) "
-                f"con {len(entries)} entradas"
-            ),
+        message = (
+            f"indice {meta.kind.value} '{meta.name}' creado sobre "
+            f"{schema.name}({column.name}) "
+            f"con {len(entries)} entradas"
         )
+        if meta.kind is IndexKind.INVERTED:
+            info = self._indexes.describe_index(meta.name)
+            pages = ", ".join(f"{fname} {item['pages']} paginas"
+                              for fname, item in info["files"].items())
+            message += f": {info['terms']} terminos, {info['postings']} posteos; {pages}"
+        return QueryResult(statement="CreateIndex", affected_rows=len(entries), message=message)
 
     def _drop_index(self, statement: ast.DropIndex) -> QueryResult:
         meta = self._catalog.drop_index(statement.name)
