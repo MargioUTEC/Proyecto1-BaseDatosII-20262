@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from functools import lru_cache
@@ -114,6 +115,19 @@ def incrustar(contenido: bytes, nombre: str, modo: str = "face"):
         raise StorageUnavailableError(
             f"no se alcanza el bloque vectorial en {base_url()} ({error})"
         ) from error
+
+
+def imagen(ruta: str) -> tuple[bytes, str]:
+    """Los bytes de un rostro indexado, para que el motor los reenvie."""
+    destino = f"{base_url()}/api/image_by_path?path={urllib.parse.quote(ruta)}"
+    try:
+        with urllib.request.urlopen(destino, timeout=TIEMPO_LIMITE) as respuesta:
+            return respuesta.read(), respuesta.headers.get("Content-Type", "image/png")
+    except urllib.error.HTTPError as error:
+        raise StorageUnavailableError(f"el bloque vectorial no tiene {ruta}") from error
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+        raise StorageUnavailableError(
+            f"no se alcanza el bloque vectorial en {base_url()} ({error})") from error
 
 
 def buscar(vector, modo: str, k: int, nprobe: int, max_candidatos: int) -> dict:

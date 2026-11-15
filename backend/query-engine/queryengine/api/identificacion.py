@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
 
 from .. import vectorsearch
 from ..errors import QueryEngineError
@@ -44,6 +44,20 @@ def crear_router(engine) -> APIRouter:
         except QueryEngineError as error:
             return {"disponible": False, "servicio": vectorsearch.base_url(),
                     "detalle": str(error)}
+
+    @router.get("/api/identificacion/imagen")
+    def imagen(path: str) -> Response:
+        """Sirve el rostro indexado a traves del motor.
+
+        El navegador habla con un solo origen, que es como ya funciona el resto
+        del cliente detras de nginx. Sin esto haria falta abrir CORS en el
+        bloque vectorial solo para pintar una miniatura.
+        """
+        try:
+            contenido, tipo = vectorsearch.imagen(path)
+        except QueryEngineError as error:
+            raise HTTPException(404, str(error)) from error
+        return Response(content=contenido, media_type=tipo)
 
     @router.post("/api/identificacion/buscar")
     async def buscar(

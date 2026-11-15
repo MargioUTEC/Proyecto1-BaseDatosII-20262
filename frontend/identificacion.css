@@ -1,0 +1,257 @@
+:root {
+  --papel:      #ece9e4;
+  --lienzo:     #f6f4f1;
+  --lienzo-2:   #e4e0da;
+  --tinta:      #1a1714;
+  --tinta-2:    #55504a;
+  --tinta-3:    #8b847c;
+  --linea:      #cdc7be;
+  --linea-suave:#ded9d2;
+
+  --lectura:    #9c5410;
+  --lectura-bg: #f2e3cf;
+  --escritura:  #0d6b62;
+  --escritura-bg:#d4e8e5;
+  --alarma:     #9d2b25;
+  --alarma-bg:  #f4dcd9;
+
+  --sans: "Archivo", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --riel: 232px;
+  --tele: 300px;
+  --mapa: 330px;
+}
+
+@media (prefers-color-scheme: dark) {
+:root:not([data-tema="claro"]) {
+    --papel:      #161412;
+    --lienzo:     #1e1b18;
+    --lienzo-2:   #262220;
+    --tinta:      #ece8e3;
+    --tinta-2:    #a8a099;
+    --tinta-3:    #756e67;
+    --linea:      #3a3430;
+    --linea-suave:#2b2724;
+
+    --lectura:    #e2a04e;
+    --lectura-bg: #3d2a12;
+    --escritura:  #4cc0b4;
+    --escritura-bg:#0e3733;
+    --alarma:     #e0766d;
+    --alarma-bg:  #3b1c19;
+  }
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+[hidden] { display: none !important; }
+
+/* La pantalla de la aplicación de identificación. Reusa los tokens de color de
+   styles.css para que las dos pantallas se vean de la misma familia. */
+
+.app-identificacion {
+  min-height: 100vh;
+  background: var(--papel);
+  color: var(--tinta);
+  font-family: var(--sans);
+}
+
+.barra {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--linea);
+  background: var(--lienzo);
+}
+
+.marca { font-weight: 700; font-size: 15px; }
+.curso {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--tinta-3);
+  margin-left: 8px;
+}
+
+.estado {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--tinta-2);
+}
+
+.punto { width: 8px; height: 8px; border-radius: 50%; background: var(--tinta-3); }
+.punto.vivo { background: var(--escritura); }
+.punto.caido { background: var(--alarma); }
+
+.volver {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--tinta-2);
+  text-decoration: none;
+  border: 1px solid var(--linea);
+  border-radius: 4px;
+  padding: 5px 10px;
+}
+.volver:hover { border-color: var(--tinta-3); color: var(--tinta); }
+
+.tablero {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 320px;
+  gap: 16px;
+  padding: 16px 22px 28px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .tablero { grid-template-columns: 1fr; }
+}
+
+.tarjeta {
+  background: var(--lienzo);
+  border: 1px solid var(--linea);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.tarjeta-cab {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--linea-suave);
+}
+.tarjeta-cab h2 { margin: 0; font-size: 12px; letter-spacing: .02em; }
+.tarjeta-cuerpo { padding: 14px; }
+.tarjeta-cuerpo.sin-pad { padding: 0; }
+
+/* la foto */
+
+.zona {
+  display: block;
+  border: 1.5px dashed var(--linea);
+  border-radius: 6px;
+  min-height: 190px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  overflow: hidden;
+  background: var(--lienzo-2);
+}
+.zona.encima { border-color: var(--escritura); background: var(--escritura-bg); }
+.zona img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.zona-texto { text-align: center; display: grid; gap: 4px; padding: 20px; }
+.zona-texto strong { font-size: 13px; }
+.zona-texto span { font-size: 11px; color: var(--tinta-3); }
+
+.controles { display: grid; gap: 10px; margin-top: 14px; }
+.controles label {
+  display: grid;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--tinta-3);
+}
+.controles input {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 7px 9px;
+  border: 1px solid var(--linea);
+  border-radius: 4px;
+  background: var(--papel);
+  color: var(--tinta);
+}
+.controles input:focus { outline: none; border-color: var(--tinta-3); }
+
+#buscar {
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 9px 12px;
+  border: 1px solid var(--linea);
+  border-radius: 4px;
+  background: var(--tinta);
+  color: var(--papel);
+  cursor: pointer;
+}
+#buscar:disabled { opacity: .45; cursor: default; }
+
+.nota {
+  margin: 10px 0 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--tinta-3);
+  word-break: break-all;
+}
+
+/* los resultados */
+
+.sello {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--escritura);
+  background: var(--escritura-bg);
+  border-radius: 3px;
+  padding: 3px 7px;
+}
+
+.rejilla {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+  padding: 14px;
+}
+
+.cara { margin: 0; border: 1px solid var(--linea-suave); border-radius: 5px; overflow: hidden; }
+.cara.primera { border-color: var(--escritura); box-shadow: 0 0 0 1px var(--escritura); }
+.cara img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--lienzo-2); }
+.cara figcaption {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 8px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  background: var(--lienzo);
+}
+.cara .id { color: var(--tinta-3); }
+.cara .sim { font-weight: 600; color: var(--escritura); }
+
+.vacio-nota { padding: 28px 14px; color: var(--tinta-3); font-size: 12px; text-align: center; }
+
+/* cómo lo resolvió */
+
+.etiqueta {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--tinta-3);
+  margin: 14px 0 6px;
+}
+.etiqueta:first-child { margin-top: 0; }
+
+.sql, .plan {
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.5;
+  background: var(--lienzo-2);
+  border: 1px solid var(--linea-suave);
+  border-radius: 4px;
+  padding: 9px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 230px;
+  overflow: auto;
+}
+
+.tiempos { margin: 0; display: grid; gap: 1px; background: var(--linea-suave); border: 1px solid var(--linea-suave); border-radius: 4px; overflow: hidden; }
+.tiempos > div { display: flex; justify-content: space-between; padding: 6px 9px; background: var(--lienzo); }
+.tiempos dt { font-family: var(--mono); font-size: 10.5px; color: var(--tinta-3); margin: 0; }
+.tiempos dd { font-family: var(--mono); font-size: 11px; margin: 0; }
+.tiempos .total dd { font-weight: 700; }

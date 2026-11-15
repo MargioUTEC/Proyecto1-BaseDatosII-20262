@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Identificación facial · CS2042</title>
+  <link rel="stylesheet" href="identificacion.css" />
+</head>
+<body class="app-identificacion">
+
+<header class="barra">
+  <div class="marca">Identificación facial <span class="curso">CS2042 · motor multimodal</span></div>
+  <div class="estado">
+    <span class="punto" id="punto"></span>
+    <span id="estadoTexto">comprobando servicios…</span>
+  </div>
+  <a class="volver" href="index.html">Consola SQL</a>
+</header>
+
+<main class="tablero">
+
+  <section class="tarjeta consulta">
+    <div class="tarjeta-cab"><h2>1. La foto</h2></div>
+    <div class="tarjeta-cuerpo">
+      <label class="zona" id="zona">
+        <input type="file" id="archivo" accept="image/*" hidden />
+        <img id="vistaPrevia" alt="" hidden />
+        <div class="zona-texto" id="zonaTexto">
+          <strong>Arrastra un rostro aquí</strong>
+          <span>o haz clic para elegirlo</span>
+        </div>
+      </label>
+
+      <div class="controles">
+        <label>Resultados
+          <input type="number" id="k" value="5" min="1" max="20" />
+        </label>
+        <label>Filtro relacional
+          <input type="text" id="filtro" placeholder="id &lt; 500" />
+        </label>
+        <button id="buscar" disabled>Identificar</button>
+      </div>
+      <p class="nota" id="aviso"></p>
+    </div>
+  </section>
+
+  <section class="tarjeta resultados">
+    <div class="tarjeta-cab">
+      <h2>2. Quién es</h2>
+      <span class="sello" id="estrategia" hidden></span>
+    </div>
+    <div class="tarjeta-cuerpo sin-pad">
+      <div class="rejilla" id="rejilla">
+        <p class="vacio-nota">Sube una foto para empezar.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="tarjeta comollego">
+    <div class="tarjeta-cab"><h2>3. Cómo lo resolvió</h2></div>
+    <div class="tarjeta-cuerpo">
+      <div class="etiqueta">La consulta que se ejecutó</div>
+      <pre class="sql" id="sql">—</pre>
+
+      <div class="etiqueta">Reparto del trabajo</div>
+      <dl class="tiempos">
+        <div><dt>vector de la foto</dt><dd id="tVector">—</dd></div>
+        <div><dt>planificación</dt><dd id="tPlan">—</dd></div>
+        <div><dt>ejecución</dt><dd id="tEjec">—</dd></div>
+        <div class="total"><dt>total</dt><dd id="tTotal">—</dd></div>
+      </dl>
+
+      <div class="etiqueta">Bloques leídos</div>
+      <dl class="tiempos">
+        <div><dt>índice</dt><dd id="bIndice">—</dd></div>
+        <div><dt>tabla</dt><dd id="bTabla">—</dd></div>
+        <div><dt>candidatos del IVF</dt><dd id="bCand">—</dd></div>
+      </dl>
+
+      <div class="etiqueta">Ruta de acceso</div>
+      <pre class="plan" id="plan">—</pre>
+    </div>
+  </section>
+
+</main>
+
+<script src="identificacion.js"></script>
+</body>
+</html>

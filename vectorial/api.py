@@ -8,6 +8,7 @@ Endpoints:
   POST /api/search_vector -> json: vector, mode, k, nprobe -> Top-K (post-filtering)
   POST /api/score         -> json: vector, mode, ids -> similitud de esos ids (pre-filtering)
   GET  /api/image/{id}    -> la imagen indexada con ese id
+  GET  /api/image_by_path -> la misma imagen, buscada por su ruta relativa
   GET  /api/paths         -> docid -> ruta relativa, para que el motor mapee sus RIDs
 """
 import time
@@ -128,6 +129,15 @@ def create_app(idx: VectorIndex) -> FastAPI:
                            for i, s in zip(ids.tolist(), valores.tolist())],
                 "candidates": int(len(ids)),
                 "search_ms": round((time.perf_counter() - start) * 1000, 4)}
+
+    @api.get("/api/image_by_path")
+    def image_by_path(path: str):
+        # El motor trabaja con rutas, no con docid: esto cierra el circulo para la UI.
+        objetivo = path.replace("\\", "/").strip("/")
+        destino = (idx.root / objetivo).resolve()
+        if not str(destino).startswith(str(idx.root.resolve())) or not destino.is_file():
+            raise HTTPException(404, f"no se encontro {path}")
+        return FileResponse(destino)
 
     @api.get("/api/paths")
     def paths(offset: int = 0, limit: int = 5000):
