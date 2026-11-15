@@ -5,3 +5,8 @@ __pycache__/
 .venv/
 data/
 *.bin
+data/lfw/
+data/indices_c/
+data/ffhq/
+data/indices_c/
+vectorial/build.log

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BD II | Bloque C</title>
+<style>
+:root{font-family:Inter,Segoe UI,Arial,sans-serif;color:#e5e7eb;background:#0b1020}
+*{box-sizing:border-box}body{margin:0}.wrap{max-width:1060px;margin:auto;padding:32px 22px}
+h1{font-size:1.9rem;margin:0 0 6px}p{color:#98a6bf}header{padding-bottom:20px;border-bottom:1px solid #273249}
+.tag{font-size:.75rem;letter-spacing:.15em;text-transform:uppercase;color:#80b1ff;font-weight:800}
+.panel{background:#141d30;border:1px solid #293854;border-radius:14px;padding:22px;margin:22px 0}
+.controls{display:grid;grid-template-columns:2fr repeat(4,1fr);gap:12px;align-items:end}
+label{font-size:.84rem;color:#b8c7de;display:flex;flex-direction:column;gap:6px}
+input,select,button{background:#0a1225;border:1px solid #354563;color:#f8fafc;border-radius:8px;padding:10px;width:100%;font:inherit}
+input[type=file]{padding:8px;font-size:.78rem}button{background:#3974ed;border-color:#3974ed;cursor:pointer;font-weight:700;max-width:250px;margin-top:16px}
+button:hover{background:#285bc4}button:disabled{opacity:.5;cursor:progress}
+#status{font-size:.85rem;color:#a5b9d6}#message{min-height:1em;color:#ffb4b4}
+#results{display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:12px}
+.card{overflow:hidden;border-radius:10px;border:1px solid #2b3c58;background:#0d1526}
+.card img{width:100%;height:160px;object-fit:cover;display:block;background:#253552}
+.card .txt{padding:10px;overflow-wrap:anywhere;font-size:.83rem}
+.card strong{color:#a4f6d9}small{display:block;color:#97abc5;margin-top:5px}
+.metrics{color:#b1c8f1;margin-bottom:16px;font-size:.87rem}.muted{color:#7f90ac}
+@media(max-width:760px){.controls{grid-template-columns:repeat(2,1fr)}.controls label:first-child{grid-column:1/-1}}
+</style>
+</head>
+<body><main class="wrap">
+<header><div class="tag">CS2042 · Proyecto BD II</div><h1>Bloque C · Biométrico y Vectorial</h1>
+<p>Embeddings faciales · SIFT + Bag of Visual Words · Índices invertidos en disco · Filter-and-Refine</p><div id="status">Leyendo índice…</div></header>
+<section class="panel">
+<form id="form"><div class="controls">
+<label>Imagen de consulta<input type="file" name="file" id="file" accept="image/*" required></label>
+<label>Método<select name="mode" id="mode"><option value="face">Rostros (SFace)</option><option value="bovw">SIFT / BoVW</option></select></label>
+<label>Resultados K<input type="number" name="k" value="5" min="1" max="50"></label>
+<label title="Cuántas listas IVF faciales explorar">nprobe (rostros)<input type="number" name="nprobe" value="4" min="1"></label>
+<label title="Palabras del vocabulario usadas para filtrar candidatos">palabras (BoVW)<input type="number" name="query_words" value="8" min="1"></label>
+</div><input type="hidden" name="max_candidates" value="500">
+<button type="submit" id="go">Buscar similares</button></form><p id="message"></p>
+</section>
+<section><div id="metrics" class="metrics"></div><div id="results"></div></section>
+<footer><p class="muted">El filtrado obtiene candidatos desde postings en disco. El refinamiento ordena por similitud coseno.</p></footer>
+</main>
+<script>
+const $ = x=>document.getElementById(x);
+async function loadStatus(){try{const r=await fetch('/api/status');if(!r.ok)throw Error('error');const s=await r.json();
+$('status').textContent=`${s.images.toLocaleString()} imágenes indexadas · ${s.faces.toLocaleString()} rostros · modo ${s.method}`;
+if(!s.dataset_available)$('status').textContent+=' · AVISO: la carpeta del dataset ya no existe en esa ruta';
+if(s.method==='face'){$('mode').querySelector('[value="bovw"]').disabled=true;}
+if(s.method==='bovw'){$('mode').value='bovw';$('mode').querySelector('[value="face"]').disabled=true;}
+}catch(e){$('status').textContent='Error consultando el índice.';}}
+$('form').addEventListener('submit',async e=>{e.preventDefault();$('message').textContent='';$('metrics').textContent='';$('results').replaceChildren();
+$('go').disabled=true;$('go').textContent='Buscando…';
+try{const r=await fetch('/api/search',{method:'POST',body:new FormData($('form'))});const data=await r.json();
+if(!r.ok)throw Error(data.detail||'Error de búsqueda');
+$('metrics').textContent=`${data.candidates} candidatos de ${data.collection_size} · selectividad ${(data.selectivity*100).toFixed(2)}% · búsqueda ${data.search_ms} ms · total ${data.total_ms} ms`;
+if(!data.results.length){$('message').textContent='Sin candidatos con los parámetros actuales. Prueba aumentar nprobe o las palabras de BoVW.';}
+for(const hit of data.results){const card=document.createElement('div');card.className='card';const img=document.createElement('img');img.src='/api/image/'+hit.id;img.alt=hit.path;img.loading='lazy';
+const info=document.createElement('div');info.className='txt';const score=document.createElement('strong');score.textContent='Similitud: '+hit.similarity.toFixed(4);
+const name=document.createElement('small');name.textContent=hit.path;info.append(score,name);card.append(img,info);$('results').appendChild(card);}
+}catch(err){$('message').textContent=err.message;}finally{$('go').disabled=false;$('go').textContent='Buscar similares';}});
+loadStatus();
+</script></body></html>
