@@ -17,6 +17,8 @@ COPY backend/query-engine/queryengine ./queryengine
 COPY storage/*.py ./storage/
 COPY hashing_dinamico/*.py ./hashing_dinamico/
 COPY textual/*.py textual/*.txt ./textual/
+# El adaptador del R-Tree busca rtree.py en los directorios padre.
+COPY rtree.py ./
 
 RUN mkdir -p /var/lib/cs2042 /data \
     && useradd --create-home --uid 1000 engine \

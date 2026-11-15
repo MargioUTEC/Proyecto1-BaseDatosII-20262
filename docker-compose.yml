@@ -35,9 +35,29 @@ services:
       QE_TABLE_DIR: /var/lib/cs2042/tables
       QE_DATA_DIR: /data
       QE_BLK01_PATH: /app/storage
+      QE_VECTORIAL_URL: http://vectorial:8003
+      QE_TEXTUAL_PATH: /app
+    depends_on:
+      - vectorial
     volumes:
       - engine-data:/var/lib/cs2042
       - ./data:/data:ro
+
+  vectorial:
+    build:
+      context: ./vectorial
+      dockerfile: Dockerfile
+    image: cs2042/vectorial:0.1.0
+    container_name: cs2042-vectorial
+    ports:
+      - "8003:8003"
+    environment:
+      VECTORIAL_INDEX: /data/indices_c
+      VECTORIAL_DATA_ROOT: /data/ffhq
+      VECTORIAL_RESULTS: /results
+    volumes:
+      - ./data:/data
+      - ./benchmarks/results:/results
 
   frontend:
     build:
@@ -49,6 +69,7 @@ services:
       - "8080:80"
     depends_on:
       - query-engine
+      - vectorial
 
 volumes:
   storage-data:
