@@ -191,7 +191,7 @@ class Planner:
         estadisticas = self._catalog.statistics(schema.name)
         candidatos = max(1, (top_k or K_POR_DEFECTO)) * FACTOR_CANDIDATOS
         relacional = self._access_path(schema, where) if conjuncts else None
-        filas_pre = relacional.estimate.rows if relacional is not None else estadisticas.row_count
+        filas_pre = _filas_estimadas(conjuncts, estadisticas)
 
         if relacional is not None and filas_pre <= candidatos:
             estimacion = cost.CostEstimate(
@@ -463,6 +463,22 @@ class Planner:
             return max(1, self._indexes.height(meta.name))
         except Exception:
             return 3
+
+
+def _filas_estimadas(conjuncts: list, estadisticas) -> int:
+    """Cuantas filas deja el filtro relacional.
+
+    No sirve mirar las filas del plan: un SeqScan con un Filter encima sigue
+    diciendo que devuelve toda la tabla, porque el filtro no cambia su
+    estimacion. Lo que decide entre pre y post filtering es la selectividad del
+    predicado, asi que se calcula aqui sobre los rangos sargables.
+    """
+    if not conjuncts:
+        return estadisticas.row_count
+    rangos = [r for r in key_ranges(conjuncts).values() if not r.empty]
+    if not rangos:
+        return estadisticas.row_count
+    return min(cost.expected_rows(rango, estadisticas) for rango in rangos)
 
 
 def _columns_only(statement: ast.Select) -> tuple[str, ...] | None:

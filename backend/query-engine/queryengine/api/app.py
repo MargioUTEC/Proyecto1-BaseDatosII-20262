@@ -86,6 +86,10 @@ def create_app() -> FastAPI:
     async def text_index(name: str) -> dict:
         return app.state.engine.text_index(name)
 
+    from .identificacion import crear_router
+
+    app.include_router(crear_router(app.state.engine))
+
     @app.get("/api/tables")
     async def list_tables() -> dict:
         return {"tables": app.state.engine.tables()}

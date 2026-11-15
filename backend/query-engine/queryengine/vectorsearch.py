@@ -18,6 +18,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+import uuid
 from functools import lru_cache
 
 from .errors import StorageUnavailableError
@@ -78,6 +79,41 @@ def rutas_indexadas(firma: str) -> tuple[str, ...]:
         if len(recogidas) >= int(pagina.get("total", 0)):
             break
     return tuple(recogidas)
+
+
+def incrustar(contenido: bytes, nombre: str, modo: str = "face"):
+    """La imagen de consulta convertida en vector por el bloque C.
+
+    Va como multipart porque el detector de rostros necesita los pixeles, no un
+    vector: es el unico punto donde el motor manda una imagen y no numeros.
+    """
+    frontera = "----motorconsultas" + uuid.uuid4().hex
+    cuerpo = b"".join([
+        f"--{frontera}\r\n".encode(),
+        f'Content-Disposition: form-data; name="file"; filename="{nombre}"\r\n'.encode(),
+        b"Content-Type: application/octet-stream\r\n\r\n",
+        contenido,
+        f"\r\n--{frontera}\r\n".encode(),
+        b'Content-Disposition: form-data; name="mode"\r\n\r\n',
+        modo.encode(),
+        f"\r\n--{frontera}--\r\n".encode(),
+    ])
+    peticion = urllib.request.Request(
+        f"{base_url()}/api/embed", data=cuerpo, method="POST",
+        headers={"Content-Type": f"multipart/form-data; boundary={frontera}"},
+    )
+    try:
+        with urllib.request.urlopen(peticion, timeout=TIEMPO_LIMITE) as respuesta:
+            return json.load(respuesta)["vector"]
+    except urllib.error.HTTPError as error:
+        detalle = error.read().decode("utf-8", "ignore")[:200]
+        raise StorageUnavailableError(
+            f"el bloque vectorial no pudo leer la imagen ({error.code}): {detalle}"
+        ) from error
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+        raise StorageUnavailableError(
+            f"no se alcanza el bloque vectorial en {base_url()} ({error})"
+        ) from error
 
 
 def buscar(vector, modo: str, k: int, nprobe: int, max_candidatos: int) -> dict:
