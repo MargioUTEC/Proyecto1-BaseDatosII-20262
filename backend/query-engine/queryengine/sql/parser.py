@@ -46,6 +46,7 @@ from .ast import (
     Not,
     OrderBy,
     Select,
+    VectorQuery,
     Statement,
     WithinRadius,
 )
@@ -53,7 +54,7 @@ from .lexer import tokenize
 from .tokens import Token, TokenType
 
 _STORAGE_KINDS = ("HEAP", "SEQUENTIAL")
-_INDEX_KINDS = ("BTREE", "HASH", "RTREE", "INVERTED")
+_INDEX_KINDS = ("BTREE", "HASH", "RTREE", "INVERTED", "IVF")
 _SCORE_FUNCTIONS = ("COSINE_SCORE", "SCORE")
 _COMPARISONS = {op.value: op for op in Comparison}
 _COMPARISONS["!="] = Comparison.NE
@@ -64,6 +65,7 @@ class Parser:
         self._tokens = tokenize(source)
         self._position = 0
         self._score_alias: str | None = None
+        self._vector_query: VectorQuery | None = None
 
     def parse(self) -> Statement:
         statement = self._statement()
@@ -271,10 +273,12 @@ class Parser:
         where = self._where_clause()
         order_by = self._order_by_clause()
         limit = self._limit_clause()
-        return Select(table, projection, where, order_by, limit, self._score_alias)
+        return Select(table, projection, where, order_by, limit, self._score_alias,
+                      self._vector_query)
 
     def _projection(self) -> tuple[str, ...] | None:
         self._score_alias = None
+        self._vector_query = None
         if self._match_punctuation("*"):
             return None
         names = [self._projection_item()]
@@ -297,7 +301,27 @@ class Parser:
                 alias = self._identifier("alias de COSINE_SCORE()")
             self._score_alias = alias
             return alias
+        if token.type is TokenType.IDENTIFIER and self._peek(1).is_operator("<=>"):
+            return self._vector_item()
         return self._identifier("nombre de columna")
+
+    def _vector_item(self) -> str:
+        # columna <=> '[0.1, -0.2, ...]' [AS alias]: distancia de coseno al vector dado.
+        if self._vector_query is not None:
+            raise self._error("solo se admite una distancia vectorial por consulta")
+        columna = self._identifier("nombre de columna")
+        self._expect_operator("<=>")
+        literal = self._current()
+        crudo = self._string("vector de consulta entre comillas")
+        try:
+            vector = _leer_vector(crudo)
+        except ValueError as error:
+            raise SQLSyntaxError(str(error), literal.line, literal.column) from None
+        alias = "distancia"
+        if self._match_keyword("AS"):
+            alias = self._identifier("alias de la distancia")
+        self._vector_query = VectorQuery(columna, vector, alias)
+        return alias
 
     def _delete(self) -> Delete:
         self._expect_keyword("DELETE")
@@ -541,6 +565,20 @@ class Parser:
     def _error(self, message: str) -> SQLSyntaxError:
         token = self._current()
         return SQLSyntaxError(message, token.line, token.column)
+
+
+def _leer_vector(crudo: str) -> tuple[float, ...]:
+    limpio = crudo.strip()
+    if limpio.startswith("["):
+        limpio = limpio[1:]
+    if limpio.endswith("]"):
+        limpio = limpio[:-1]
+    if not limpio.strip():
+        raise ValueError("el vector de consulta esta vacio")
+    try:
+        return tuple(float(parte) for parte in limpio.split(","))
+    except ValueError:
+        raise ValueError(f"vector invalido {crudo!r}; se esperaba '[0.1, -0.2, ...]'") from None
 
 
 def parse(source: str) -> Statement:

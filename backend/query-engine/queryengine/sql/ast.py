@@ -168,6 +168,15 @@ class OrderBy:
 
 
 @dataclass(frozen=True)
+class VectorQuery:
+    # La consulta vectorial que el SELECT pide: columna indexada, vector y alias.
+
+    column: str
+    vector: tuple[float, ...]
+    alias: str
+
+
+@dataclass(frozen=True)
 class Select(Statement):
     table: str
     projection: tuple[str, ...] | None  # None means SELECT *
@@ -176,6 +185,8 @@ class Select(Statement):
     limit: int | None = None
     score_alias: str | None = None
     # Alias de COSINE_SCORE(); también aparece en projection.
+    vector_query: VectorQuery | None = None
+    # embedding <=> '[...]' AS alias; el alias también aparece en projection.
 
 
 @dataclass(frozen=True)

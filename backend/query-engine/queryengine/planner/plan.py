@@ -377,3 +377,45 @@ def _range_text(column: str, lower, upper, lower_inclusive: bool, upper_inclusiv
     if upper is not None:
         parts.append(f"{column} {'<=' if upper_inclusive else '<'} {upper!r}")
     return " AND ".join(parts) if parts else f"{column} sin acotar"
+
+
+@dataclass
+class VectorSearch(PlanNode):
+    # embedding <=> '[...]': IVF del bloque vectorial. Emite filas ya ordenadas por
+    # similitud y deja el puntaje de cada RID en `scores` para el alias del SELECT.
+    #
+    # Con `child` puesto corre pre-filtering: la via relacional acota las filas y el
+    # IVF solo puntua esas. Sin `child` corre post-filtering: el IVF sondea sus listas
+    # y el filtro relacional se aplica despues.
+
+    table: str = ""
+    index: str = ""
+    column: str = ""
+    vector: tuple = ()
+    alias: str = "distancia"
+    child: PlanNode | None = None
+    top_k: int | None = None
+    ascending: bool = False
+    nprobe: int | None = None
+    strategy: str = ""
+    scores: dict = field(default_factory=dict)
+
+    @property
+    def label(self) -> str:
+        return "IVFScan" if self.child is None else "IVFRefine"
+
+    @property
+    def children(self) -> list[PlanNode]:
+        return [self.child] if self.child else []
+
+    def details(self) -> dict:
+        detail = {"table": self.table, "index": self.index, "column": self.column,
+                  "dim": len(self.vector), "as": self.alias,
+                  "ranking": "coseno " + ("ASC" if self.ascending else "DESC")}
+        if self.top_k is not None:
+            detail["top_k"] = self.top_k
+        if self.nprobe is not None:
+            detail["nprobe"] = self.nprobe
+        if self.strategy:
+            detail["strategy"] = self.strategy
+        return detail

@@ -31,9 +31,10 @@ from ..planner.plan import (
     SequentialSearch,
     Sort,
     TextSearch,
+    VectorSearch,
 )
-from ..storage.port import RID, IndexManager, Record, StorageEngine
 from ..spatial import parse_point
+from ..storage.port import RID, IndexManager, Record, StorageEngine
 from .expressions import matches
 
 Tuple = tuple[RID, Record]
@@ -58,6 +59,8 @@ class Executor:
             return self._spatial_knn(node, schema)
         if isinstance(node, RTreeWindowScan):
             return self._spatial_window(node, schema)
+        if isinstance(node, VectorSearch):
+            return self._vector_search(node, schema)
         if isinstance(node, TextSearch):
             return self._text_search(node, schema)
         if isinstance(node, SequentialSearch):
@@ -214,6 +217,53 @@ class Executor:
                         "table_reads": table_reads, "table_writes": table_writes,
                         "index_ms": round(index_ms, 4), "table_ms": round(table_ms, 4)}
         return iter(output)
+
+    def _vector_search(self, node: VectorSearch, schema: TableSchema) -> Iterator[Tuple]:
+        # Con hijo: pre-filtering, el IVF solo puntua las filas que sobrevivieron.
+        # Sin hijo: post-filtering, el IVF sondea sus listas y devuelve candidatos.
+        io = self._indexes.io
+        indice_antes = (io.disk_reads, io.disk_writes)
+        indice_inicio = time.perf_counter()
+        if node.child is not None:
+            filas = list(self.execute(node.child, schema))
+            registros = {rid: record for rid, record in filas}
+            puntuados, detalle = self._indexes.vector_score(
+                node.index, node.vector, list(registros))
+        else:
+            pedidos = max(1, (node.top_k or 5)) * 4
+            puntuados, detalle = self._indexes.vector_search(
+                node.index, node.vector, pedidos, node.nprobe)
+            registros = {}
+        indice_ms = (time.perf_counter() - indice_inicio) * 1000
+        indice_delta = (io.disk_reads - indice_antes[0], io.disk_writes - indice_antes[1])
+
+        puntuados.sort(key=lambda par: par[1], reverse=not node.ascending)
+        tabla_antes = (io.disk_reads, io.disk_writes)
+        tabla_inicio = time.perf_counter()
+        salida: list[Tuple] = []
+        scores: dict = {}
+        for rid, similitud in puntuados:
+            record = registros.get(rid)
+            if record is None:
+                record = self._storage.fetch(node.table, rid)
+            if record is None:
+                continue
+            salida.append((rid, record))
+            scores[rid] = similitud
+            if node.top_k is not None and len(salida) >= node.top_k:
+                break
+        tabla_ms = (time.perf_counter() - tabla_inicio) * 1000
+        tabla_delta = (io.disk_reads - tabla_antes[0], io.disk_writes - tabla_antes[1])
+
+        node.scores = scores
+        node.runtime = {"index_reads": indice_delta[0], "index_writes": indice_delta[1],
+                        "table_reads": tabla_delta[0], "table_writes": tabla_delta[1],
+                        "index_ms": round(indice_ms, 4), "table_ms": round(tabla_ms, 4),
+                        "candidates": detalle.get("candidates", len(puntuados)),
+                        "returned": len(salida),
+                        "selectivity": detalle.get("selectivity", 0.0),
+                        "servicio_ms": detalle.get("search_ms", 0.0)}
+        return iter(salida)
 
     def _text_search(self, node: TextSearch, schema: TableSchema) -> Iterator[Tuple]:
         # MATCH: con índice, RIDs ya rankeados + fetch (fila borrada -> None, se descarta);

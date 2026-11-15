@@ -26,8 +26,8 @@ KEYWORDS = frozenset(
     }
 )
 
-# Longest first so that '>=' is matched before '>'.
-OPERATORS = ("<>", "!=", ">=", "<=", "=", "<", ">")
+# Longest first so that '<=>' is matched before '<=' and '>=' before '>'.
+OPERATORS = ("<=>", "<>", "!=", ">=", "<=", "=", "<", ">")
 PUNCTUATION = ("(", ")", ",", ";", "*", ".")
 
 

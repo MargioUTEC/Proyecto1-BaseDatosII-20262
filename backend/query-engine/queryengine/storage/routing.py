@@ -100,6 +100,12 @@ class RoutingIndexStore:
     def entry_count(self, name: str) -> int:
         return self._route(name).entry_count(name)
 
+    def vector_search(self, name: str, vector, k: int, nprobe: int | None = None):
+        return self._route(name).vector_search(name, vector, k, nprobe)
+
+    def vector_score(self, name: str, vector, rids):
+        return self._route(name).vector_score(name, vector, rids)
+
     def text_search(self, name: str, query: str, top_k: int | None):
         return self._route(name).text_search(name, query, top_k)
 

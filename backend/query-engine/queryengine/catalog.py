@@ -35,6 +35,7 @@ class IndexKind(Enum):
     HASH = "HASH"
     RTREE = "RTREE"
     INVERTED = "INVERTED"
+    IVF = "IVF"
 
     @property
     def supports_range(self) -> bool:

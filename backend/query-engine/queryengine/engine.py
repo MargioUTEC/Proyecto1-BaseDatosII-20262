@@ -377,7 +377,11 @@ class QueryEngine:
                 raise CatalogError("la columna RTREE debe almacenar POINT(lon lat) en CHAR/VARCHAR")
         if statement.kind == "INVERTED" and column.type.kind.value not in ("CHAR", "VARCHAR"):
             raise CatalogError("un indice INVERTED necesita una columna CHAR o VARCHAR")
-        if statement.options and statement.kind != "INVERTED":
+        if statement.kind == "IVF" and column.type.kind.value not in ("CHAR", "VARCHAR"):
+            raise CatalogError(
+                "un indice IVF necesita una columna CHAR o VARCHAR con la ruta de la imagen"
+            )
+        if statement.options and statement.kind not in ("INVERTED", "IVF"):
             raise CatalogError(f"el indice {statement.kind} no admite opciones WITH (...)")
         meta = IndexMeta(
             name=statement.name,

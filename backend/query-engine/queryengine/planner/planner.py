@@ -18,10 +18,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..catalog import Catalog, IndexKind, IndexMeta, StorageKind, TableSchema
-from ..types import TypeKind
 from ..errors import PlannerError
 from ..sql import ast
 from ..storage.port import IndexManager
+from ..types import TypeKind
 from . import cost
 from .binder import bind_expression, bind_projection
 from .plan import (
@@ -41,8 +41,12 @@ from .plan import (
     SequentialSearch,
     Sort,
     TextSearch,
+    VectorSearch,
 )
 from .predicates import KeyRange, as_sargable, key_ranges, split_conjuncts
+
+K_POR_DEFECTO = 5
+FACTOR_CANDIDATOS = 4
 
 
 @dataclass
@@ -130,6 +134,9 @@ class Planner:
                                 estimate=estimate)
         else:
             where = bind_expression(statement.where, schema)
+            vectorial = self._vector_search(schema, statement, where)
+            if vectorial is not None:
+                return vectorial
             textual = self._text_search(schema, statement, where)
             if textual is not None:
                 return textual
@@ -144,6 +151,92 @@ class Planner:
         if projection != schema.column_names:
             node = Project(child=node, columns=projection)
         return node
+
+    # -- recuperacion vectorial -------------------------------------------
+
+    def _vector_search(self, schema: TableSchema, statement: ast.Select,
+                       where: ast.Expression | None) -> PlanNode | None:
+        """Decide entre pre y post filtering, que es lo que el enunciado pide reportar.
+
+        Pre-filtering: la via relacional acota las filas y el IVF solo puntua esas,
+        asi que cuesta lo que cuesta el filtro. Post-filtering: el IVF sondea sus
+        listas y el filtro se aplica despues, asi que cuesta lo que cuesta el indice.
+        Gana la mas barata, y TopK deja dicho cual corrio.
+        """
+        consulta = statement.vector_query
+        if consulta is None:
+            return None
+        meta = next((m for m in self._catalog.indexes_on(schema.name, consulta.column)
+                     if m.kind is IndexKind.IVF), None)
+        if meta is None:
+            raise PlannerError(
+                f"'{consulta.column} <=> ...' necesita un indice IVF sobre "
+                f"{schema.name}({consulta.column})"
+            )
+
+        conjuncts = split_conjuncts(where)
+        if any(isinstance(c, ast.Match) for c in conjuncts):
+            raise PlannerError("no se puede combinar MATCH con una distancia vectorial")
+        order = statement.order_by
+        if order is not None and order.spatial_column is not None:
+            raise PlannerError("no se puede combinar ORDER BY DISTANCE con <=>")
+        por_similitud = order is not None and order.column.lower() == consulta.alias.lower()
+        if order is not None and not por_similitud:
+            raise PlannerError(
+                f"una consulta vectorial se ordena por su alias; usa ORDER BY {consulta.alias}"
+            )
+        top_k = statement.limit
+        ascendente = bool(por_similitud and not order.descending)
+
+        estadisticas = self._catalog.statistics(schema.name)
+        candidatos = max(1, (top_k or K_POR_DEFECTO)) * FACTOR_CANDIDATOS
+        relacional = self._access_path(schema, where) if conjuncts else None
+        filas_pre = relacional.estimate.rows if relacional is not None else estadisticas.row_count
+
+        if relacional is not None and filas_pre <= candidatos:
+            estimacion = cost.CostEstimate(
+                relacional.estimate.blocks + filas_pre,
+                min(filas_pre, top_k or filas_pre),
+                f"{relacional.estimate.rationale}; el IVF puntua esas {filas_pre} filas",
+            )
+            return self._rematar(VectorSearch(
+                table=schema.name, index=meta.name, column=consulta.column,
+                vector=consulta.vector, alias=consulta.alias, child=relacional,
+                top_k=top_k, ascending=ascendente,
+                strategy="pre-filtering mediante la via relacional",
+                estimate=estimacion,
+            ), statement, schema, residual=[])
+
+        nprobe = int(meta.option("nprobe") or 0) or None
+        estimacion = cost.CostEstimate(
+            float(candidatos + (top_k or K_POR_DEFECTO)),
+            top_k or K_POR_DEFECTO,
+            f"el IVF sondea sus listas y devuelve {candidatos} candidatos "
+            f"+ {top_k or K_POR_DEFECTO} lecturas por RID",
+        )
+        nodo = VectorSearch(
+            table=schema.name, index=meta.name, column=consulta.column,
+            vector=consulta.vector, alias=consulta.alias, top_k=top_k,
+            ascending=ascendente, nprobe=nprobe,
+            strategy=("post-filtering sobre los candidatos del IVF" if conjuncts
+                      else "ranking directo sobre el IVF"),
+            estimate=estimacion,
+        )
+        return self._rematar(nodo, statement, schema, residual=conjuncts)
+
+    def _rematar(self, nodo: PlanNode, statement: ast.Select, schema: TableSchema,
+                 residual: list) -> PlanNode:
+        fuente = nodo
+        if residual:
+            predicate = _rebuild_conjunction(residual)
+            nodo = Filter(child=nodo, predicate=predicate, text=_render(predicate),
+                          estimate=nodo.estimate)
+        if statement.limit is not None:
+            nodo = Limit(child=nodo, count=statement.limit)
+        if statement.projection is not None and statement.projection != schema.column_names:
+            nodo = Project(child=nodo, columns=statement.projection,
+                           score_alias=statement.vector_query.alias, score_source=fuente)
+        return nodo
 
     # -- recuperacion textual ---------------------------------------------
 
@@ -373,10 +466,16 @@ class Planner:
 
 
 def _columns_only(statement: ast.Select) -> tuple[str, ...] | None:
-    # La proyección sin el alias de COSINE_SCORE().
-    if statement.projection is None or statement.score_alias is None:
+    # La proyección sin los alias que calcula el plan: COSINE_SCORE() y la distancia.
+    if statement.projection is None:
+        return None
+    calculados = {statement.score_alias}
+    if statement.vector_query is not None:
+        calculados.add(statement.vector_query.alias)
+    calculados.discard(None)
+    if not calculados:
         return statement.projection
-    return tuple(name for name in statement.projection if name != statement.score_alias)
+    return tuple(name for name in statement.projection if name not in calculados)
 
 
 def _conjuncts_for(conjuncts: list[ast.Expression], column: str) -> list[ast.Expression]:

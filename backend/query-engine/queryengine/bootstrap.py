@@ -97,6 +97,9 @@ def _index_backend(io: IOCounter, settings: Settings, layer):
     candidates.append(
         ("indice invertido en disco (SPIMI)", DiskInvertedIndex(io, settings.table_dir))
     )
+    from .storage.diskvector import VectorIndexAdapter
+
+    candidates.append(("IVF del bloque vectorial", VectorIndexAdapter(io)))
     if layer is not None and layer.BPlusTree is not None:
         from .storage.diskindex import DiskIndexStore
 
