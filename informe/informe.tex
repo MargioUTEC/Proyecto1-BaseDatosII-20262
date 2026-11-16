@@ -2,6 +2,10 @@
 
 % --- PAQUETES PRINCIPALES ---
 \usepackage[utf8]{inputenc}
+% Sin T1 la codificacion por defecto imprime < como invertida de admiracion y >
+% como invertida de interrogacion dentro de \texttt y de los listados, de modo
+% que 'id >= 100' o el operador <=> salen ilegibles.
+\usepackage[T1]{fontenc}
 % es-noshorthands desactiva los atajos de babel para " . < >, que de otro modo
 % chocan con la sintaxis de TikZ (por ejemplo >=stealth en las flechas).
 \usepackage[spanish,es-tabla,es-noshorthands]{babel}
@@ -104,7 +108,11 @@
 \begin{titlepage}
     \centering
     \vspace*{0.5cm}
-    \includegraphics[width=7.5cm]{UTEC-Logo.jpg}\par\vspace{0.8cm}
+    % El logo no esta versionado: sin el, la portada sale sin imagen en vez de
+    % detener la compilacion.
+    \IfFileExists{UTEC-Logo.jpg}{%
+        \includegraphics[width=7.5cm]{UTEC-Logo.jpg}\par\vspace{0.8cm}}{%
+        \vspace{2.5cm}}
 
     {\large \textbf{UNIVERSIDAD DE INGENIERÍA Y TECNOLOGÍA}\par}
     \vspace{0.4cm}
@@ -997,6 +1005,12 @@ transferencia mueve más bytes. La ventaja es clara cuando las consultas son
 escaneos o rangos, donde todo lo que entra en el bloque se aprovecha, y se
 diluye cuando son búsquedas puntuales que solo necesitan un registro de los
 setenta y siete que trajo la página.
+
+% ==============================================================================
+% ENTREGABLE 2
+% ==============================================================================
+
+\input{entregable2_motor}
 
 \section{Conclusiones}
 
