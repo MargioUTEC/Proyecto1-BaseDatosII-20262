@@ -1,0 +1,512 @@
+% ==============================================================================
+% ENTREGABLE 2, BLOQUE D: EXTENSION MULTIMODAL DEL MOTOR DE CONSULTAS
+%
+% Fragmento para insertar en informe.tex despues de las secciones de los bloques
+% A, B y C. Se apoya en el preambulo que ya trae el documento: booktabs,
+% tabularx, listings, float, pgfplots con el estilo "figura", el estilo tikz
+% "nota" y los colores cHeap, cSeq, cBtree, cHash, cGrid, cEje y cNota.
+%
+% HACE FALTA UNA LINEA MAS EN EL PREAMBULO:
+%
+%     \usepackage[T1]{fontenc}
+%
+% justo despues de \usepackage[utf8]{inputenc}. Sin ella la codificacion de
+% fuente por defecto imprime < como invertida de admiracion y > como invertida
+% de interrogacion dentro de \texttt y de los listados, de modo que 'id < 10' y
+% el operador <=> salen mal. Afecta tambien a lo que ya esta escrito en la
+% seccion del planificador del entregable 1 ('id >= 100', 'id <= 500').
+%
+%   \input{entregable2_motor}
+%
+% Si los experimentos se agrupan todos en la seccion de experimentacion, la
+% subseccion "Experimento 9" se mueve alla sin tocar el resto.
+% ==============================================================================
+
+\section{Extensión Multimodal del Motor de Consultas}
+
+En el primer entregable el motor resolvía un solo tipo de pregunta: comparar una
+columna contra una constante. Este entregable le suma tres formas de buscar que
+no se parecen entre sí ni a la anterior. La espacial pide los puntos cercanos a
+una coordenada, la textual ordena documentos por relevancia frente a una
+consulta de palabras, y la vectorial ordena imágenes por parecido frente a otra
+imagen. Las tres devuelven filas ordenadas por una magnitud que la tabla no
+guarda en ninguna columna.
+
+El trabajo de esta parte fue que el motor aceptara las tres sin convertirse en
+cuatro motores pegados. Lo que hicimos fue extender la gramática, agregar un
+contrato común que cualquier estructura de índice puede implementar, y meter en
+el planificador la decisión que el enunciado pide reportar: cuándo conviene
+acotar las filas antes de consultar el índice y cuándo conviene lo contrario.
+Sobre eso se construyó la aplicación de identificación facial, que es la que
+pone los tres niveles a trabajar en una sola consulta.
+
+\subsection{Gramática de las Consultas Multimodales}
+
+\subsubsection{Las tres familias de predicado}
+
+Las extensiones se añadieron al analizador léxico y al parser de descenso
+recursivo que ya existían, sin cambiar la precedencia de operadores ni la forma
+del árbol sintáctico. Cada familia entra por un sitio distinto de la gramática,
+y esa diferencia no es estética: refleja dónde encaja cada una en la semántica
+de un \texttt{SELECT}.
+
+\begin{table}[H]
+\centering
+\caption{Dónde entra cada familia en la gramática}
+\begin{tabularx}{\textwidth}{@{}llX@{}}
+\toprule
+\textbf{Familia} & \textbf{Lugar} & \textbf{Sintaxis} \\
+\midrule
+Espacial, radio & predicado del \texttt{WHERE} & \texttt{col WITHIN\_RADIUS((lon, lat), r)} \\
+Espacial, k-NN & cláusula \texttt{ORDER BY} & \texttt{ORDER BY DISTANCE(col, (lon, lat))} \\
+Textual & predicado del \texttt{WHERE} & \texttt{col MATCH 'términos'} \\
+Textual, puntaje & lista de proyección & \texttt{COSINE\_SCORE() AS rel} \\
+Vectorial & lista de proyección & \texttt{col \textless=\textgreater{} '[v1, ..., vn]' AS sim} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+El radio es un predicado porque recorta el conjunto de filas y se puede combinar
+con \texttt{AND} como cualquier otra condición. El k-NN, en cambio, no recorta
+nada: ordena, y el recorte lo hace el \texttt{LIMIT}. Por eso vive en el
+\texttt{ORDER BY} y no en el \texttt{WHERE}, que fue la primera cosa que tuvimos
+que decidir y la que más ordenó el resto del diseño.
+
+La distancia vectorial es el caso más incómodo de los cinco. No es un predicado
+ni una cláusula de orden: es una columna calculada que no está en la tabla. El
+operador \texttt{\textless=\textgreater{}} aparece en la proyección, produce una similitud por fila y
+obliga a declarar un alias, porque sin nombre el \texttt{ORDER BY} no tiene cómo
+referirse a ella. El motor rechaza la consulta si falta:
+
+\begin{lstlisting}[language=SQL, caption={Declaración y uso del índice vectorial}]
+CREATE TABLE rostros (
+  id        INT PRIMARY KEY,
+  lote      CHAR(8),
+  embedding VARCHAR(23)
+) USING HEAP;
+
+CREATE INDEX ix_rostros_ivf ON rostros (embedding)
+  USING IVF WITH (mode = 'face', nprobe = 4);
+
+SELECT id, lote, embedding <=> '[0.111721, 0.152196, ...]' AS similitud
+FROM rostros
+WHERE id < 1000
+ORDER BY similitud DESC
+LIMIT 5;
+\end{lstlisting}
+
+\subsubsection{La columna indexada guarda una referencia, no el vector}
+
+La tabla no almacena los 128 flotantes de cada rostro. Guarda la ruta de la
+imagen, y es el índice el que resuelve de ahí el vector. Esto no fue una
+concesión: es la misma idea con la que el R-Tree del bloque espacial indexa un
+\texttt{POINT(lon lat)} escrito en una columna de texto. La tabla guarda la
+referencia y la estructura guarda la geometría.
+
+La consecuencia práctica es que un registro de \texttt{rostros} ocupa 36 bytes y
+entran 101 por página, así que las 13\,000 filas caben en 129 páginas. Si el
+vector viviera en la tabla, cada fila pesaría 512 bytes solo de flotantes y la
+misma tabla ocuparía más de 1\,700 páginas, con el agravante de que ninguna
+consulta relacional necesita leer esos bytes.
+
+\subsection{Acoplamiento de las Tres Familias de Índice}
+
+\subsubsection{Un contrato que no sabe de geometría ni de texto}
+
+Las tres estructuras nuevas se enchufan por la misma interfaz que ya usaban el
+árbol B$^+$ y el hash extensible. Un índice declara qué puede servir y el motor
+le pregunta antes de registrarlo; si no puede, devuelve el motivo en texto y ese
+motivo es lo que llega al usuario:
+
+\begin{lstlisting}[caption={Motivo de rechazo de un índice}]
+CREATE INDEX ix ON rostros (id) USING IVF;
+
+  rostros.id debe guardar la ruta de la imagen en CHAR/VARCHAR
+\end{lstlisting}
+
+El despachador mantiene la lista de candidatos y encamina cada operación al que
+aceptó ese índice. Lo que no acepta nadie cae a un sustituto en memoria, de modo
+que una consulta sigue respondiendo aunque la estructura que le correspondía no
+esté disponible. El cliente muestra en qué estructura quedó cada índice, y en
+las mediciones de este informe los tres corren sobre la real:
+
+\begin{table}[H]
+\centering
+\caption{Las tres familias conviviendo en un solo catálogo}
+\begin{tabularx}{\textwidth}{@{}llX@{}}
+\toprule
+\textbf{Familia} & \textbf{Dónde corre} & \textbf{Estructura que la atiende} \\
+\midrule
+\texttt{RTREE} & en el proceso del motor & R-Tree paginado en disco \\
+\texttt{INVERTED} & en el proceso del motor & índice invertido en disco (SPIMI) \\
+\texttt{IVF} & en un servicio aparte, por HTTP & IVF del bloque vectorial \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsubsection{El índice que vive en otro proceso}
+
+El IVF es el único que no corre dentro del motor. Sus vectores los produce un
+modelo que arrastra opencv y onnxruntime, y meter eso en la imagen del motor la
+multiplicaba de tamaño. El adaptador implementa el mismo contrato que los demás
+y traduce por HTTP, con una complicación propia: el servicio identifica sus
+rostros con un número correlativo y el motor trabaja con RIDs. El adaptador
+construye el mapa entre los dos al crear el índice, leyendo la columna de rutas,
+y es lo único que necesita para traducir en ambas direcciones.
+
+Ese mapa es también lo único que se pierde al reiniciar, y encontrarlo nos costó.
+Con el catálogo persistido, el motor arrancaba con el índice IVF declarado pero
+vacío, así que la consulta vectorial se planificaba bien y devolvía cero filas.
+Los índices espacial y textual tenían su rutina de reapertura y el vectorial no.
+Ahora el arranque lo reconstruye recorriendo la tabla, que es donde las rutas ya
+están guardadas, y hay una prueba que levanta el motor dos veces sobre el mismo
+catálogo para fijar ese comportamiento.
+
+\subsection{Planificador Híbrido}
+
+\subsubsection{Las dos rutas}
+
+Cuando una consulta trae un filtro relacional y además un ranking vectorial, hay
+dos formas de resolverla y dan el mismo resultado por caminos de costo muy
+distinto.
+
+\begin{table}[H]
+\centering
+\caption{Las dos estrategias de una consulta híbrida}
+\begin{tabularx}{\textwidth}{@{}llX@{}}
+\toprule
+\textbf{Estrategia} & \textbf{Nodo} & \textbf{Qué hace} \\
+\midrule
+Pre-filtering & \texttt{IVFRefine} & la vía relacional acota las filas y el índice
+solo calcula la similitud de esas \\
+Post-filtering & \texttt{IVFScan} con un \texttt{Filter} encima & el índice sondea
+sus listas y devuelve candidatos ordenados; el filtro se aplica después \\
+Ranking directo & \texttt{IVFScan} & no hay filtro relacional \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+La estrategia que corrió queda escrita en el nodo del plan y se ve tanto en la
+consola SQL como en la pantalla de identificación, que es lo que el enunciado
+pide reportar.
+
+\subsubsection{La regla de decisión}
+
+La primera versión comparaba cuántas filas deja el filtro contra cuántos
+candidatos pediría el índice, y elegía pre-filtering cuando el filtro dejaba
+menos. Suena razonable y está mal por un motivo que solo se ve midiendo: el
+post-filtering aplica el filtro sobre lo que el índice devolvió, no sobre lo que
+el índice miró. Si el filtro es muy selectivo, de los resultados del índice no
+sobrevive casi ninguno y la consulta responde con menos filas de las pedidas sin
+avisar de nada. Con \texttt{LIMIT 5} y un filtro que deja el 4 por ciento de la
+tabla, nos devolvía una o dos.
+
+La regla que quedó mira eso directamente. Si $C$ es el número de filas que el
+índice puede entregar, $f$ la fracción de la tabla que pasa el filtro y $k$ las
+filas pedidas, el post-filtering solo sirve si
+\begin{equation}
+    \left\lfloor C \cdot f \right\rfloor \ge m \cdot k ,
+\end{equation}
+con $m = 2$ de margen, porque cuántas sobreviven es un sorteo alrededor de
+$C \cdot f$ y pedir lo justo falla la mitad de las veces. Cuando la condición no
+se cumple, el motor acota antes aunque eso cueste recorrer la tabla entera.
+Elegido el post-filtering, el nodo no pide $k$ filas al índice sino
+\begin{equation}
+    \min\left(C,\; m \cdot \left\lceil k / f \right\rceil\right),
+\end{equation}
+de manera que después del filtro sigan quedando las $k$. El plan deja ese número
+a la vista en el campo \texttt{pide}.
+
+Hay un tercer caso que al principio no habíamos previsto. Si el planificador no
+puede estimar la selectividad del filtro, porque es una igualdad sobre una
+columna sin estadísticas, no sabe si el post-filtering alcanza. Dar por bueno que
+el filtro no reduce nada lleva a elegirlo y a devolver menos filas; por eso ante
+una estimación que no aporta información el motor prefiere pre-filtering, que es
+correcto siempre. La diferencia se nota en el filtro \texttt{lote = '00000'} de
+nuestras pruebas, que deja mil filas y el catálogo no sabe cuántas.
+
+\begin{lstlisting}[caption={Los dos planes para la misma foto de consulta}]
+WHERE id < 100                          ->  pre-filtering
+-> Project (columns=id, lote, similitud)
+  -> Limit (rows=5)
+    -> IVFRefine (index=ix_rostros_ivf dim=128 top_k=5)
+      -> Filter (condition=id < 100)
+        -> SeqScan (table=rostros)
+
+WHERE id > 2                            ->  post-filtering
+-> Project (columns=id, lote, similitud)
+  -> Limit (rows=5)
+    -> Filter (condition=id > 2)
+      -> IVFScan (index=ix_rostros_ivf dim=128 top_k=5 pide=12 nprobe=4)
+\end{lstlisting}
+
+\subsubsection{Lo que solo apareció con el dataset completo}
+
+Tres errores de esta parte sobrevivieron a las pruebas unitarias y aparecieron
+recién al cargar los 13\,000 rostros. Los tres tenían la misma causa de fondo:
+las pruebas corren sobre tablas de cinco filas, y a esa escala cualquier
+constante parece razonable.
+
+El primero fue que la decisión leía las filas que reportaba el plan relacional.
+Un \texttt{SeqScan} con un \texttt{Filter} encima sigue informando que devuelve
+la tabla entera, porque el filtro no cambia su estimación, así que el
+planificador creía que ningún filtro reducía nada y elegía post-filtering
+siempre. La selectividad hay que calcularla aparte, sobre los rangos sargables
+del predicado.
+
+El segundo fue la estimación de cuánto mira el índice. Estaba fijada en cuatro
+veces $k$, que son veinte vectores para una consulta de cinco, cuando el IVF con
+\texttt{nprobe = 4} sobre 128 listas sondea 1\,340 de 13\,000. Un orden de
+magnitud de diferencia, y con el número chico el pre-filtering no ganaba nunca.
+Ahora el servicio informa cuántas listas tiene su índice y la estimación sale de
+ahí, de la fracción $\text{nprobe}/\text{listas}$, que no depende de $k$.
+
+El tercero fue el tope de resultados. El servicio vectorial no devuelve más de
+50 filas por consulta, un límite sensato para una interfaz de búsqueda y un techo
+duro para el post-filtering. Pedir 326 candidatos no servía de nada y seguíamos
+recibiendo dos filas. El planificador ahora conoce ese tope y lo usa como la $C$
+de la fórmula, que es lo que movió la frontera a donde las mediciones la
+encuentran.
+
+\subsection{Aplicación de Identificación Facial}
+
+La aplicación recibe una foto y responde con los rostros más parecidos del
+conjunto indexado, pero no va al índice por su cuenta: construye una sentencia
+SQL con el vector como literal y la ejecuta por el mismo camino que cualquier
+otra consulta. Esa decisión tiene una consecuencia que vale el esfuerzo: la
+pantalla puede mostrar el plan que corrió, los bloques que leyó y la estrategia
+que el planificador eligió, porque son los mismos datos que devuelve la consola
+SQL.
+
+\begin{table}[H]
+\centering
+\caption{Endpoints añadidos al motor}
+\begin{tabularx}{\textwidth}{@{}llX@{}}
+\toprule
+\textbf{Método} & \textbf{Ruta} & \textbf{Función} \\
+\midrule
+\texttt{GET} & \texttt{/api/identificacion/estado} & Si el bloque vectorial
+responde y cuántos rostros tiene indexados \\
+\texttt{POST} & \texttt{/api/identificacion/buscar} & Recibe la foto, arma la
+consulta y devuelve filas, plan, estrategia y métricas \\
+\texttt{GET} & \texttt{/api/identificacion/imagen} & Sirve una imagen indexada
+por su ruta \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+El último endpoint existe por una razón de navegador. La galería de resultados
+necesita mostrar las imágenes, que viven en el servicio vectorial en otro
+puerto, y pedirlas desde ahí las bloqueaba por origen cruzado. El motor las
+reenvía, con lo que el cliente habla con un solo origen igual que en el primer
+entregable.
+
+La pantalla tiene tres paneles: la foto de consulta con el filtro relacional y el
+número de resultados, la galería ordenada por similitud con el primer puesto
+marcado, y el panel que explica cómo se resolvió, con la sentencia que se
+ejecutó, el reparto de tiempos y la ruta de acceso. Cambiar el filtro y ver cómo
+el sello de la estrategia pasa de una a otra es la demostración más directa de
+que el planificador está decidiendo de verdad.
+
+\begin{table}[H]
+\centering
+\caption{Reparto de una identificación completa, sin filtro relacional}
+\begin{tabular}{@{}lrl@{}}
+\toprule
+\textbf{Etapa} & \textbf{ms} & \textbf{Dónde ocurre} \\
+\midrule
+Vector de la foto (YuNet + SFace) & 48{,}50 & servicio vectorial \\
+Análisis léxico y sintáctico & 0{,}39 & motor \\
+Planificación & 0{,}06 & motor \\
+Ejecución & 4{,}97 & motor y servicio \\
+\midrule
+\textbf{Total} & \textbf{53{,}92} & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Nueve de cada diez milisegundos se los lleva calcular el vector de la foto, que
+es detección más una pasada de la red de reconocimiento sobre una imagen de
+1024 por 1024. Todo lo que hace el motor, incluido parsear una sentencia que
+lleva 128 flotantes escritos como literal, suma cinco milisegundos. La
+planificación cuesta 0{,}06, de modo que el trabajo que describe este informe no
+es el que domina el tiempo de respuesta, y eso está bien: significa que la
+consulta híbrida sale prácticamente gratis frente al costo de mirar la foto.
+
+Sobre la calidad del resultado, la foto de consulta se recupera a sí misma con
+similitud 1{,}000 y el segundo puesto queda en 0{,}373. Esa separación es la que
+hace legible la galería: el primer rostro es el mismo y los siguientes son
+parecidos de lejos.
+
+\subsection{Experimento 9: Estrategia de Filtrado en Consultas Híbridas}
+
+\begin{lstlisting}[language=bash, caption={Ejecución del experimento}]
+python benchmarks/experimento9_hibrido.py
+\end{lstlisting}
+
+El arnés monta la tabla de 13\,000 rostros en un directorio temporal con el
+backend de disco, toma una foto del propio conjunto como consulta y repite cada
+medición cinco veces después de una corrida de calentamiento, quedándose con la
+mediana. Deja tres archivos CSV en \texttt{benchmarks/results/}. Las cifras de
+bloques son las que el \texttt{DiskCounter} registró.
+
+\begin{table}[H]
+\centering
+\caption{Estrategia elegida según la selectividad del filtro, con $k = 5$}
+\begin{tabular}{@{}lrrlrrr@{}}
+\toprule
+\textbf{Filtro} & \textbf{Filas} & \textbf{\% tabla} & \textbf{Estrategia} &
+\textbf{Pide} & \textbf{Bloques} & \textbf{ms} \\
+\midrule
+sin filtro & 13\,000 & 100{,}00 & directo & 5 & 5 & 1{,}63 \\
+\texttt{id \textless{} 10} & 10 & 0{,}08 & pre & 5 & 128 & 23{,}47 \\
+\texttt{id \textless{} 100} & 100 & 0{,}77 & pre & 5 & 128 & 23{,}82 \\
+\texttt{id \textless{} 500} & 500 & 3{,}85 & pre & 5 & 128 & 24{,}60 \\
+\texttt{id \textless{} 1000} & 1\,000 & 7{,}69 & pre & 5 & 128 & 26{,}25 \\
+\texttt{id \textless{} 2600} & 2\,600 & 20{,}00 & pre & 5 & 128 & 30{,}46 \\
+\texttt{id \textless{} 5000} & 5\,000 & 38{,}46 & post & 28 & 28 & 1{,}79 \\
+\texttt{id \textless{} 9000} & 9\,000 & 69{,}23 & post & 16 & 16 & 1{,}24 \\
+\texttt{id \textgreater{} 2} & 12\,997 & 99{,}98 & post & 12 & 12 & 1{,}11 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Las nueve consultas devolvieron las cinco filas pedidas, que es la invariante
+que la regla de decisión y la sobre-emisión existen para sostener.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[figura,
+    height=6.8cm,
+    xmode=log, ymode=log,
+    xlabel={Fracción de la tabla que deja pasar el filtro (\%)},
+    ylabel={Bloques leídos},
+    xmin=0.05, xmax=200, ymin=6, ymax=330,
+    xtick={0.1,1,10,100},
+    xticklabels={0{,}1\%,1\%,10\%,100\%},
+    ytick={10,30,100,128},
+    yticklabels={10,30,100,128},
+    legend pos=south west,
+]
+% La referencia y la marca del cambio van antes que las series, para quedar
+% por debajo de ellas.
+\addplot[cHeap, dashed, mark=none, forget plot] coordinates {(0.05,128)(200,128)};
+\node[nota, anchor=south west, text=cHeap] at (axis cs:0.055,133)
+  {escaneo completo de la tabla};
+
+\draw[cNota, dotted, line width=0.6pt] (axis cs:28,6) -- (axis cs:28,105);
+\node[nota, anchor=east] at (axis cs:24,46)
+  {el índice ya puede entregar\\las 5 filas tras el filtro};
+
+\addplot[cBtree, mark=*]
+  coordinates {(0.08,128)(0.77,128)(3.85,128)(7.69,128)(20,128)};
+\addlegendentry{Pre-filtering (IVFRefine)}
+\addplot[cSeq, mark=triangle*]
+  coordinates {(38.46,28)(69.23,16)(99.98,12)};
+\addlegendentry{Post-filtering (IVFScan)}
+\end{axis}
+\end{tikzpicture}
+\caption{Bloques leídos según lo selectivo que sea el filtro relacional, con
+$k = 5$ y ambos ejes logarítmicos. El pre-filtering paga el escaneo completo de
+la tabla sin importar cuántas filas sobrevivan, porque \texttt{rostros} no tiene
+índice sobre la columna del filtro; el post-filtering solo lee las filas que
+termina devolviendo. La línea punteada vertical marca dónde el planificador
+cambia de estrategia, que es donde el índice empieza a poder entregar las cinco
+filas pedidas una vez aplicado el filtro.}
+\label{fig:e9-estrategia}
+\end{figure}
+
+El salto entre las dos estrategias es de dos órdenes de magnitud en tiempo, de
+30 milisegundos a 1{,}8, y de más de cuatro veces en bloques. La razón está en
+que \texttt{rostros} no tiene índice sobre \texttt{id}: el pre-filtering acota
+las filas recorriendo la tabla completa, así que su costo es el del escaneo
+secuencial más el cálculo de similitud de las filas que pasaron. Es el precio de
+poder responder la consulta completa, y el planificador lo paga solo cuando la
+otra vía no puede.
+
+\begin{table}[H]
+\centering
+\caption{Los dos extremos entre los que se mueven las estrategias}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{Ruta} & \textbf{Bloques} & \textbf{ms} \\
+\midrule
+Escaneo completo con filtro (\texttt{SeqScan} + \texttt{Filter}) & 128 & 21{,}37 \\
+Ranking por el IVF, sin filtro & 5 & 1{,}63 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+La tercera parte del experimento varía \texttt{nprobe}, que es cuántas de las
+128 listas del índice se sondean. Lo interesante es que mueve mucho el trabajo
+del índice y nada la estrategia:
+
+\begin{table}[H]
+\centering
+\caption{Efecto de \texttt{nprobe} sobre el sondeo y sobre la decisión}
+\begin{tabular}{@{}rrrrlr@{}}
+\toprule
+\textbf{nprobe} & \textbf{Candidatos} & \textbf{\% colección} &
+\textbf{ms sin filtro} & \textbf{Estrategia con \texttt{id \textless{} 1000}} &
+\textbf{Bloques} \\
+\midrule
+1 & 353 & 2{,}72 & 1{,}13 & pre & 128 \\
+2 & 607 & 4{,}67 & 1{,}17 & pre & 128 \\
+4 & 1\,340 & 10{,}31 & 1{,}22 & pre & 128 \\
+8 & 2\,345 & 18{,}04 & 1{,}23 & pre & 128 \\
+16 & 4\,474 & 34{,}42 & 1{,}59 & pre & 128 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Los candidatos crecen de 353 a 4\,474, trece veces, y el tiempo sube de 1{,}13 a
+1{,}59 milisegundos. La comparación de vectores está vectorizada en el servicio y
+cuesta poco frente al resto, así que subir \texttt{nprobe} sale casi gratis en
+tiempo aunque multiplique el trabajo nominal. La estrategia, en cambio, no se
+mueve: con \texttt{id \textless{} 1000} el post-filtering seguiría sin alcanzar porque el
+techo no es cuánto sondea el índice sino cuántas filas accede a devolver, que son
+50. Sondear más no ayuda si el resultado se recorta igual.
+
+Esa es la lección del experimento, y no la esperábamos. Pensábamos que la
+decisión entre pre y post filtering iba a depender del costo de cada ruta, y
+depende de algo anterior: de si la ruta puede responder la pregunta. El costo
+solo decide entre las rutas que sí pueden, y en esta tabla, sin un índice sobre
+la columna del filtro, cuando el post-filtering puede es además el más barato por
+un margen amplio.
+
+\subsection{Verificación}
+
+La parte del motor tiene 248 pruebas automatizadas, de las cuales 12 cubren el
+camino vectorial con un doble del servicio, de modo que corren sin opencv ni
+modelos. Además hay una comprobación de extremo a extremo que levanta una tabla
+por bloque, corre una consulta de cada familia y revisa que el plan elegido sea
+el que corresponde:
+
+\begin{lstlisting}[language=bash, caption={Comprobación de los cuatro bloques}]
+python scripts/verificar_p2.py
+\end{lstlisting}
+
+\begin{lstlisting}[caption={Salida de la comprobación}]
+Bloque A  espacial (R-Tree paginado)
+  ok   busqueda por radio usa el R-Tree               3 locales
+  ok   el radio deja fuera lo que no alcanza          ids [1, 2, 3]
+  ok   k-NN usa el R-Tree                             2 < 3 < 1
+Bloque B  textual (indice invertido SPIMI)
+  ok   ranking por coseno usa el indice invertido     2 documentos
+  ok   consulta booleana con NOT                      ids [5]
+Bloque C  vectorial (IVF sobre rostros) y planificador hibrido
+  ok   el motor ve el servicio vectorial              13000 imagenes, 12998 rostros
+  ok   la foto de consulta se encuentra a si misma    00000/00000.png -> 100.0%
+  ok   un filtro selectivo elige pre-filtering
+  ok   un filtro debil elige post-filtering
+Bloque D  catalogo y vertebra del motor
+  ok   las tres familias de indice conviven en un catalogo  INVERTED IVF RTREE
+  ok   los indices corren sobre su estructura real, no el sustituto
+  ok   la via vectorial lee menos bloques que el escaneo completo  5 contra 129
+\end{lstlisting}
+
+El conjunto indexado son las carpetas \texttt{00000} a \texttt{13000} de FFHQ,
+13\,000 imágenes de 1024 por 1024 que pesan 17 GB. El detector encontró rostro en
+12\,998, y las dos que faltan son fotos donde la cara queda cortada o muy de
+perfil.

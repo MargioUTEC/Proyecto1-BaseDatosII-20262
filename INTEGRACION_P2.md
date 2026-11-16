@@ -94,20 +94,33 @@ La aplicación queda en `frontend/identificacion.html` y la consola SQL en
 
 ## El dataset
 
-**FFHQ**, carpetas `00000` a `13000`, 14 000 rostros de 1024x1024.
+**FFHQ**, carpetas `00000` a `13000`, 1000 rostros de 1024x1024 por carpeta.
+Pesa 17 GB en disco.
 
-```bash
-python scripts/descargar_ffhq.py --destino data/ffhq
-```
-
-El script es reanudable: salta las carpetas que ya están completas. Va lento
-porque los archivos sueltos de esa unidad compartida no tienen enlace público y
-la única vía es pedir la carpeta entera. Si hay prisa, bajarlo desde el
-navegador o con Google Drive para escritorio y dejarlo en `data/ffhq/` sale
-igual de bien: el resto no distingue de dónde vino.
+Lo que funcionó fue bajar las carpetas desde el navegador y descomprimirlas
+sobre `data/ffhq/`, que queda con la forma `data/ffhq/00000/00000.png`. El
+script `scripts/descargar_ffhq.py` es reanudable y hace lo mismo sin salir de la
+consola, pero va lento: los archivos sueltos de esa unidad compartida no tienen
+enlace público, así que la única vía es pedir la carpeta entera.
 
 El índice del bloque C se construye con lo que haya en disco, así que se puede
 trabajar con una parte y rehacerlo cuando esté completo.
+
+### Parámetros del índice para este tamaño
+
+Los valores por omisión del bloque C están pensados para las 1000 imágenes con
+que se desarrolló. Con 13 000 hay que subirlos, porque son los que deciden
+cuánto poda el índice:
+
+| Parámetro | Por omisión | Aquí | Por qué |
+|---|---|---|---|
+| `--clusters` | 32 | 128 | centroides del IVF facial. Con 32, `nprobe=4` sondea un octavo de la colección; con 128 baja a un 3%, que es la raíz de 13 000 redondeada |
+| `--words` | 64 | 256 | vocabulario visual del BoVW. Con 64 palabras las listas de posteo se vuelven casi la colección entera |
+| `--train-images` | 300 | 1500 | imágenes de las que sale el vocabulario |
+
+La construcción completa toma unas dos horas y media en un portátil, un solo
+hilo. Guarda un checkpoint cada cinco minutos y reanuda con el mismo comando, y
+conviene lanzarla con `python -u` para poder seguir el avance en el log.
 
 ## Dependencias que hacían falta y no estaban declaradas
 
