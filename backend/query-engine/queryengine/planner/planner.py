@@ -15,6 +15,7 @@ the plan is correct regardless of which path wins.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from ..catalog import Catalog, IndexKind, IndexMeta, StorageKind, TableSchema
@@ -47,6 +48,8 @@ from .predicates import KeyRange, as_sargable, key_ranges, split_conjuncts
 
 K_POR_DEFECTO = 5
 FACTOR_CANDIDATOS = 4
+MARGEN_RECALL = 2
+MAX_CANDIDATOS = 500
 
 
 @dataclass
@@ -189,15 +192,29 @@ class Planner:
         ascendente = bool(por_similitud and not order.descending)
 
         estadisticas = self._catalog.statistics(schema.name)
-        candidatos = max(1, (top_k or K_POR_DEFECTO)) * FACTOR_CANDIDATOS
+        candidatos = self._candidatos_ivf(meta, top_k, estadisticas.row_count)
         relacional = self._access_path(schema, where) if conjuncts else None
         filas_pre = _filas_estimadas(conjuncts, estadisticas)
+        pedidas = max(1, top_k or K_POR_DEFECTO)
+        holgura = pedidas * MARGEN_RECALL
+        tope = self._tope_ivf(meta)
+        entregables = min(tope, candidatos)
+        sobreviven = (None if filas_pre is None
+                      else _supervivientes(entregables, filas_pre, estadisticas.row_count))
 
-        if relacional is not None and filas_pre <= candidatos:
+        if relacional is not None and (sobreviven is None or sobreviven < holgura):
+            acotadas = estadisticas.row_count if filas_pre is None else filas_pre
+            razon = (f"{relacional.estimate.rationale}; el IVF puntua esas "
+                     f"{acotadas} filas. ")
+            razon += ("No hay estadisticas del filtro, y el post-filtering sin saber "
+                      "su selectividad devolveria menos filas de las pedidas"
+                      if sobreviven is None else
+                      f"Del indice sobrevivirian {sobreviven}, y hacen falta "
+                      f"{holgura} para responder {pedidas} con margen")
             estimacion = cost.CostEstimate(
-                relacional.estimate.blocks + filas_pre,
-                min(filas_pre, top_k or filas_pre),
-                f"{relacional.estimate.rationale}; el IVF puntua esas {filas_pre} filas",
+                relacional.estimate.blocks + acotadas,
+                min(acotadas, top_k or acotadas),
+                razon,
             )
             return self._rematar(VectorSearch(
                 table=schema.name, index=meta.name, column=consulta.column,
@@ -208,21 +225,58 @@ class Planner:
             ), statement, schema, residual=[])
 
         nprobe = int(meta.option("nprobe") or 0) or None
+        emite = _emision(top_k, conjuncts, filas_pre, estadisticas.row_count, entregables)
         estimacion = cost.CostEstimate(
-            float(candidatos + (top_k or K_POR_DEFECTO)),
+            float(candidatos + emite),
             top_k or K_POR_DEFECTO,
             f"el IVF sondea sus listas y devuelve {candidatos} candidatos "
-            f"+ {top_k or K_POR_DEFECTO} lecturas por RID",
+            f"+ {emite} lecturas por RID",
         )
         nodo = VectorSearch(
             table=schema.name, index=meta.name, column=consulta.column,
             vector=consulta.vector, alias=consulta.alias, top_k=top_k,
-            ascending=ascendente, nprobe=nprobe,
+            emit=emite, ascending=ascendente, nprobe=nprobe,
             strategy=("post-filtering sobre los candidatos del IVF" if conjuncts
                       else "ranking directo sobre el IVF"),
             estimate=estimacion,
         )
         return self._rematar(nodo, statement, schema, residual=conjuncts)
+
+    def _tope_ivf(self, meta: IndexMeta) -> int:
+        """El maximo de filas que el indice entrega de una consulta.
+
+        Importa porque es el techo del post-filtering: el filtro solo puede
+        trabajar sobre lo que el indice devolvio, no sobre todo lo que sondeo.
+        """
+        por_opcion = int(meta.option("max_candidates") or 0)
+        techo = getattr(self._indexes, "result_cap", None)
+        if techo is not None:
+            try:
+                del_servicio = techo(meta.name)
+            except Exception:  # noqa: BLE001 - sin el servicio queda la opcion del indice
+                del_servicio = None
+            if del_servicio:
+                return del_servicio
+        return por_opcion or MAX_CANDIDATOS
+
+    def _candidatos_ivf(self, meta: IndexMeta, top_k: int | None, filas: int) -> int:
+        """Cuantos vectores mira la via del indice, que es con lo que se compara el filtro.
+
+        El indice sondea nprobe de sus listas, asi que toca una fraccion de la
+        coleccion que no depende de k: con 128 listas y nprobe 4 son unas 400 de
+        13 000 filas. Suponer k * FACTOR_CANDIDATOS en su lugar lo subestima por
+        un orden de magnitud en cuanto la tabla crece, y entonces el
+        pre-filtering no gana nunca.
+        """
+        minimo = max(1, (top_k or K_POR_DEFECTO)) * FACTOR_CANDIDATOS
+        estimar = getattr(self._indexes, "candidate_estimate", None)
+        if estimar is None:
+            return minimo
+        try:
+            sondeados = estimar(meta.name, filas)
+        except Exception:  # noqa: BLE001 - sin el servicio se usa la cota de abajo
+            return minimo
+        return max(minimo, sondeados) if sondeados else minimo
 
     def _rematar(self, nodo: PlanNode, statement: ast.Select, schema: TableSchema,
                  residual: list) -> PlanNode:
@@ -465,20 +519,63 @@ class Planner:
             return 3
 
 
-def _filas_estimadas(conjuncts: list, estadisticas) -> int:
-    """Cuantas filas deja el filtro relacional.
+def _supervivientes(candidatos: int, filas_filtradas: int, filas_tabla: int) -> int:
+    """Cuantas de las filas que sondea el IVF pasarian el filtro relacional.
+
+    Es la cuenta que decide la estrategia. Si de lo que el indice alcanza a
+    mirar sobreviven menos de las k pedidas, el post-filtering no puede
+    responder la consulta completa por barato que sea, y hay que acotar antes
+    aunque eso cueste recorrer la tabla.
+    """
+    if filas_tabla <= 0:
+        return candidatos
+    return math.floor(candidatos * max(1, filas_filtradas) / filas_tabla)
+
+
+def _emision(top_k: int | None, conjuncts: list, filas_filtradas: int | None,
+             filas_tabla: int, tope: int) -> int:
+    """Cuantas filas tiene que emitir el IVF para que al final queden las k pedidas.
+
+    En post-filtering el filtro relacional corre encima del ranking, asi que de
+    las filas que emite el indice solo sobrevive la fraccion que pasa el
+    predicado. Emitiendo k exactas la consulta devuelve menos de las pedidas: con
+    un filtro que deja el 4% de la tabla y k=5, salen una o dos.
+
+    Lo que se emite es k dividido por esa fraccion, por el margen: cuantas
+    sobreviven es un sorteo alrededor de ese valor, asi que pedir lo justo falla
+    la mitad de las veces. El tope es lo que el indice admite devolver, porque
+    mas alla de ahi no hay candidatos que pedir.
+    """
+    pedidas = max(1, top_k or K_POR_DEFECTO)
+    if not conjuncts or filas_tabla <= 0 or filas_filtradas is None:
+        return pedidas
+    fraccion = max(1, filas_filtradas) / filas_tabla
+    holgado = math.ceil(pedidas / fraccion) * MARGEN_RECALL
+    return min(max(tope, pedidas), max(pedidas, holgado))
+
+
+def _filas_estimadas(conjuncts: list, estadisticas) -> int | None:
+    """Cuantas filas deja el filtro relacional, o None si no hay con que saberlo.
 
     No sirve mirar las filas del plan: un SeqScan con un Filter encima sigue
     diciendo que devuelve toda la tabla, porque el filtro no cambia su
     estimacion. Lo que decide entre pre y post filtering es la selectividad del
     predicado, asi que se calcula aqui sobre los rangos sargables.
+
+    Cuando la cuenta no aporta nada, porque no sale ningun rango o porque sin
+    estadisticas de la columna el estimador acaba devolviendo la tabla entera,
+    esto contesta None en lugar de un numero. La diferencia importa: dar por
+    bueno que el filtro no reduce nada lleva a elegir post-filtering, y si el
+    filtro resulta selectivo la consulta devuelve menos filas de las pedidas,
+    o ninguna, sin avisar.
     """
     if not conjuncts:
         return estadisticas.row_count
     rangos = [r for r in key_ranges(conjuncts).values() if not r.empty]
     if not rangos:
-        return estadisticas.row_count
-    return min(cost.expected_rows(rango, estadisticas) for rango in rangos)
+        return None
+    estimadas = min(cost.expected_rows(rango, estadisticas) for rango in rangos)
+    return None if estimadas >= estadisticas.row_count else estimadas
 
 
 def _columns_only(statement: ast.Select) -> tuple[str, ...] | None:

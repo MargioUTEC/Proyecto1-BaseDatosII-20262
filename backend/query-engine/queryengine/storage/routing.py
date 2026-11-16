@@ -112,6 +112,16 @@ class RoutingIndexStore:
     def describe_index(self, name: str) -> dict:
         return self._route(name).describe_index(name)
 
+    def candidate_estimate(self, name: str, rows: int) -> int | None:
+        destino = self._route(name)
+        estimar = getattr(destino, "candidate_estimate", None)
+        return estimar(name, rows) if estimar is not None else None
+
+    def result_cap(self, name: str) -> int | None:
+        destino = self._route(name)
+        techo = getattr(destino, "result_cap", None)
+        return techo(name) if techo is not None else None
+
     def describe(self) -> dict[str, str]:
         """Where each index lives, for the catalog listing and the report."""
         return dict(self._reasons)

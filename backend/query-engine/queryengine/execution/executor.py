@@ -222,18 +222,23 @@ class Executor:
         # Con hijo: pre-filtering, el IVF solo puntua las filas que sobrevivieron.
         # Sin hijo: post-filtering, el IVF sondea sus listas y devuelve candidatos.
         io = self._indexes.io
+        registros: dict = {}
+        hijo_antes = (io.disk_reads, io.disk_writes)
+        hijo_inicio = time.perf_counter()
+        if node.child is not None:
+            registros = dict(self.execute(node.child, schema))
+        hijo_ms = (time.perf_counter() - hijo_inicio) * 1000
+        hijo_delta = (io.disk_reads - hijo_antes[0], io.disk_writes - hijo_antes[1])
+
         indice_antes = (io.disk_reads, io.disk_writes)
         indice_inicio = time.perf_counter()
         if node.child is not None:
-            filas = list(self.execute(node.child, schema))
-            registros = {rid: record for rid, record in filas}
             puntuados, detalle = self._indexes.vector_score(
                 node.index, node.vector, list(registros))
         else:
-            pedidos = max(1, (node.top_k or 5)) * 4
+            pedidos = node.emit or max(1, (node.top_k or 5)) * 4
             puntuados, detalle = self._indexes.vector_search(
                 node.index, node.vector, pedidos, node.nprobe)
-            registros = {}
         indice_ms = (time.perf_counter() - indice_inicio) * 1000
         indice_delta = (io.disk_reads - indice_antes[0], io.disk_writes - indice_antes[1])
 
@@ -250,15 +255,20 @@ class Executor:
                 continue
             salida.append((rid, record))
             scores[rid] = similitud
-            if node.top_k is not None and len(salida) >= node.top_k:
+            tope = node.emit or node.top_k
+            if tope is not None and len(salida) >= tope:
                 break
         tabla_ms = (time.perf_counter() - tabla_inicio) * 1000
         tabla_delta = (io.disk_reads - tabla_antes[0], io.disk_writes - tabla_antes[1])
 
+        # Los bloques del hijo son lecturas de la tabla, no del indice: en
+        # pre-filtering el hijo es la via relacional que acota las filas.
         node.scores = scores
         node.runtime = {"index_reads": indice_delta[0], "index_writes": indice_delta[1],
-                        "table_reads": tabla_delta[0], "table_writes": tabla_delta[1],
-                        "index_ms": round(indice_ms, 4), "table_ms": round(tabla_ms, 4),
+                        "table_reads": tabla_delta[0] + hijo_delta[0],
+                        "table_writes": tabla_delta[1] + hijo_delta[1],
+                        "index_ms": round(indice_ms, 4),
+                        "table_ms": round(tabla_ms + hijo_ms, 4),
                         "candidates": detalle.get("candidates", len(puntuados)),
                         "returned": len(salida),
                         "selectivity": detalle.get("selectivity", 0.0),

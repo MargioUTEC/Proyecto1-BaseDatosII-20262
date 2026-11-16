@@ -54,6 +54,7 @@ class VectorIndexAdapter:
             "modo": str(opciones.get("mode", "face")).lower(),
             "nprobe": int(opciones.get("nprobe", 4)),
             "max_candidatos": int(opciones.get("max_candidates", 500)),
+            **_geometria_del_servicio(),
             "por_ruta": {},
             "por_docid": {},
         }
@@ -102,8 +103,29 @@ class VectorIndexAdapter:
     def describe_index(self, name: str) -> dict:
         indice = self._entrada(name)
         return {"kind": IndexKind.IVF.value, "mode": indice["modo"],
-                "nprobe": indice["nprobe"], "entries": len(indice["por_ruta"]),
+                "nprobe": indice["nprobe"], "lists": indice["listas"],
+                "cap": indice["tope"],
+                "entries": len(indice["por_ruta"]),
                 "servicio": vectorsearch.base_url()}
+
+    def result_cap(self, name: str) -> int | None:
+        """Cuantas filas como maximo entrega el indice de una sola consulta."""
+        indice = self._entrada(name)
+        tope = indice["tope"] or indice["max_candidatos"]
+        return tope or None
+
+    def candidate_estimate(self, name: str, rows: int) -> int | None:
+        """Cuantos vectores sondea el IVF, que es lo que cuesta la via del indice.
+
+        Son nprobe listas de las que tiene el indice, asi que la fraccion de la
+        coleccion que toca es nprobe/listas y no depende de k. Sin el servicio
+        delante no hay con que estimarlo y decide el planificador.
+        """
+        indice = self._entrada(name)
+        listas = indice["listas"]
+        if not listas or rows <= 0:
+            return None
+        return max(1, min(rows, round(rows * indice["nprobe"] / listas)))
 
     # -- lo que usa el planificador vectorial ---------------------------
 
@@ -158,6 +180,22 @@ class VectorIndexAdapter:
             raise StorageUnavailableError(
                 f"el indice vectorial '{name}' no esta abierto"
             ) from None
+
+
+def _geometria_del_servicio() -> dict:
+    """Lo que el bloque C sabe de su indice y el planificador no puede adivinar.
+
+    `listas` son los centroides del IVF, que fijan la fraccion de la coleccion
+    que sondea cada consulta. `tope` es el maximo de resultados que el servicio
+    accede a devolver, que es el techo del recall en post-filtering. Sin
+    servicio delante se planifica sin las dos pistas.
+    """
+    try:
+        estado = vectorsearch.estado()
+    except Exception:  # noqa: BLE001 - sin servicio se planifica sin estas pistas
+        return {"listas": 0, "tope": 0}
+    return {"listas": int(estado.get("face_clusters", 0)),
+            "tope": int(estado.get("k_max", 0))}
 
 
 def _normalizar(valor) -> str:

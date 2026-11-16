@@ -41,7 +41,10 @@ def create_app(idx: VectorIndex) -> FastAPI:
     def status():
         return {"images": idx.meta["count"], "faces": idx.meta["n_face"],
                 "method": idx.meta["method"], "root": str(idx.root),
-                "dataset_available": idx.root.is_dir()}
+                "dataset_available": idx.root.is_dir(),
+                "face_clusters": int(idx.meta.get("face_clusters", 0)),
+                "words": int(idx.meta.get("words", 0)),
+                "k_max": K_MAXIMO}
 
     # -----------------------------------------------------------------------
     # Bloque para servir las imágenes indexadas

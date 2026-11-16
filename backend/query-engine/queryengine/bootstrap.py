@@ -77,6 +77,7 @@ def build_engine(settings: Settings | None = None) -> QueryEngine:
     _reopen_existing_tables(engine, storage)
     _reopen_spatial_indexes(engine, indexes, storage)
     _reopen_inverted_indexes(engine, indexes, storage)
+    _reopen_vector_indexes(engine, indexes, storage)
     return engine
 
 
@@ -149,3 +150,26 @@ def _reopen_spatial_indexes(engine: QueryEngine, indexes, storage) -> None:
                     (parse_point(record[position]), rid) for rid, record in storage.scan(schema.name)
                     if record[position] is not None
                 ))
+
+
+def _reopen_vector_indexes(engine: QueryEngine, indexes, storage) -> None:
+    """Rebuild the path to RID map an IVF index needs after a restart.
+
+    The vectors themselves live in the vector service, so there is nothing to
+    persist on this side. What gets lost is the translation between that
+    service's docids and our RIDs, and the table already holds every path it
+    takes to rebuild it.
+    """
+    for schema in engine.catalog.tables():
+        for meta in engine.catalog.indexes_on(schema.name):
+            if meta.kind.value != "IVF":
+                continue
+            indexes.reopen_index(meta, schema)
+            if indexes.entry_count(meta.name):
+                continue
+            position = schema.index_of(meta.column)
+            indexes.bulk_load(meta.name, (
+                (record[position], rid)
+                for rid, record in storage.scan(schema.name)
+                if record[position] is not None
+            ))

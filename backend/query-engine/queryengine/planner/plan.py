@@ -387,6 +387,10 @@ class VectorSearch(PlanNode):
     # Con `child` puesto corre pre-filtering: la via relacional acota las filas y el
     # IVF solo puntua esas. Sin `child` corre post-filtering: el IVF sondea sus listas
     # y el filtro relacional se aplica despues.
+    #
+    # `emit` es cuantas filas emite el nodo, que en post-filtering es mas que `top_k`:
+    # el filtro de arriba va a descartar parte, asi que si emitiera k exactas la
+    # consulta devolveria menos de las pedidas.
 
     table: str = ""
     index: str = ""
@@ -395,6 +399,7 @@ class VectorSearch(PlanNode):
     alias: str = "distancia"
     child: PlanNode | None = None
     top_k: int | None = None
+    emit: int | None = None
     ascending: bool = False
     nprobe: int | None = None
     strategy: str = ""
@@ -414,6 +419,8 @@ class VectorSearch(PlanNode):
                   "ranking": "coseno " + ("ASC" if self.ascending else "DESC")}
         if self.top_k is not None:
             detail["top_k"] = self.top_k
+        if self.emit is not None and self.emit != self.top_k:
+            detail["pide"] = self.emit
         if self.nprobe is not None:
             detail["nprobe"] = self.nprobe
         if self.strategy:
