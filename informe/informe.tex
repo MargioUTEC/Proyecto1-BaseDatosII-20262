@@ -95,7 +95,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small Base de Datos II}
-\fancyhead[R]{\small Gestor Multimodal, Entregable 1}
+\fancyhead[R]{\small Gestor Multimodal, Entregable 2}
 \fancyfoot[C]{\thepage}
 \renewcommand{\headrulewidth}{0.4pt}
 \setlength{\headheight}{15pt}
@@ -122,7 +122,7 @@
     {\large \textbf{BASE DE DATOS II}\par}
     \vspace{0.5cm}
 
-    {\Huge \textbf{Informe del Entregable 1}\par}
+    {\Huge \textbf{Informe del Entregable 2}\par}
     \vspace{0.4cm}
     {\Large \textbf{Proyecto: Gestor de Base de Datos Multimodal}\par}
     \vspace{0.3cm}
@@ -136,7 +136,6 @@
         Francisco Calle Ochoa\\
         Mauricio Gonzalez Kremer\\
         Nicolás Llerena Silva\\
-        Diana Ñañez Andres
     \end{minipage}
     \hfill
     \begin{minipage}[t]{0.42\textwidth}
@@ -148,7 +147,7 @@
 
     \vfill
     {\large \textbf{Lima, Perú}\par}
-    {\large Setiembre, 2026\par}
+    {\large Noviembre, 2026\par}
 \end{titlepage}
 
 \pagenumbering{roman}
@@ -212,57 +211,278 @@ El DiskCounter asegura que solo se contabilicen transferencias a nivel de bloque
 \section{Métodos de Organización de Archivos}
 \subsection{Heap File}
 % Inserción O(1) con Free-List o append, Full Table Scan y eliminación.
+Para uno de los métodos de organización de archivos se implementó Heap File, haciendo uso de Move-The-Last y Full Table Scan. Heap es conveniente para la nueva inserción de documentos, pero este es más lento para la búsqueda de los elementos. La estructura física opera sobre páginas homogéneas de $B = 4096$ bytes gestionados con la librería struct.
+
+
+\textbf{Estructura física y diseño de Página:}
+
+
+\begin{itemize}
+    \item \textbf{Cabecera de Pagina:} Reserva los primeros 20 bytes de la siguiente manera. Todas de tipo integer: \texttt{page\_id} (4B), \texttt{record\_count} (4B), \texttt{free\_space} (4B), \texttt{next\_page} (4B), \texttt{prev\_page\_id} (4B).
+    \item \textbf{Estructura de tupla:} Cada registro de empleado ocupa 66 bytes empquetados en Little-Endian con el siguiente formato: (\texttt{<i 30s 20s f i i}), con clave primaria (\texttt{id}), se rellena con bytes nulos (\texttt{x00}), el salario en punto flotante y punteros lógicos de desbordamiento.
+    \item \textbf{Identificador de registro:} Cada registro está identificado por el par (\text{page\_id}, \text{slot\_number}).
+\end{itemize}
+
+
+\textbf{Operaciones:}
+\begin{itemize}
+    \item \textbf{Inserción O(1):} Para asegurarnos que se tenga un costo de escritura constante en disco, la inserción consulta a la última página activa ($P_{\text{last}} = \text{total\_pages} - 1$). Si la página dispone de espacio ($N_{\text{rec}} < N_{\text{max}}$), se añade la tupla al final del bloque. En caso de que se llene, se solicita la creación de un nuevo bloque al \texttt{disk\_manager} mediante la función \text{allocate\_page()} y se enlazan los punteros de la lista.
+    \item \textbf{Búsqueda (Full Table Scan):} Dado que los registros no tienen una organización secuencial previa. La búsqueda puntual evalúa de manera secuencial en tiempo $O(P)$, donde $P$ sería el número total de páginas ocupadas por la tabla en el disco.
+    \begin{equation}
+        \text{I/O reads Search} = P = \left\lceil \frac{N}{N_{\text{max}}} \right\rceil
+    \end{equation}
+    \item \textbf{Eliminación (Move-The-Last):} Para mantener la estructura y evitar espacios inutilizados de bytes, en este caso se implementó \textit{Move-The-Last}. El algoritmo sustituye la tupla a eliminar por la última tupla de la última página física de toda la estructura, reduciendo el contador del bloque final. Este proceso tiene un costo de acceso:
+        \begin{equation}
+            \text{I/O cost Remove} \le 2 \text{ lecturas} + 2 \text{ escrituras}
+        \end{equation}
+\end{itemize}
+
+
+\textbf{Complejidad de I/O:}
+\begin{table}[h]
+\centering
+\caption{Complejidad teorica de I/O para Heap File}
+\label{tab:heap_complejidad}
+\begin{tabular}{|l|c|c|}
+\hline
+\textbf{Operacion} & \textbf{Lecturas Disco} & \textbf{Escrituras Disco} \\ \hline
+Inserción & $O(1)$ & $O(1)$ \\ \hline
+Busqueda (Full Scan) & $O(P)$ & $0$ \\ \hline
+Eliminacion (Move-The-Last) & $O(P)$ (busqueda) + $O(1)$ & $O(1)$ \\ \hline
+\end{tabular}
+\end{table}
+
+
+
 
 \subsection{Sequential File}
 % Estructura dual (Área Principal + Overflow), búsqueda binaria y reorganización.
+\textbf{Arquitectura dual: Area principal y Area overflow}
+El Sequential File implementa un esquema estructurado que almacena en dos archivos binarios independientes para garantizar un orden físico y evitar reordenaciones completas en cada inserción.
+
+
+\begin{enumerate}
+    \item \textbf{Área principal:} Contiene bloques de tamaño fijo con registros ordenados físicamente por la clave primaria (\texttt{id}), lo que permite la aplicación de algoritmos de búsqueda binaria.
+    \item \textbf{Área de overflow:} Contiene las tuplas que no saben en el área principal, provocado al momento de insertarse el elemento pero encontrarse sin espacio. El orden lógico se mantiene mediante listas enlazadas utilizando los campos \texttt{next\_page} y \texttt{next\_slot} incrustados en cada registro.
+\end{enumerate}
+
+
+\textbf{Algoritmos implementados:}
+\begin{itemize}
+    \item \textbf{Búsqueda binaria de bloques y navegación:} La búsqueda de un registro $\text{id}_{\text{target}}$ realiza una partición binaria sobre los bloques del área principal.
+    \begin{equation}
+        \text{Pagina mid} = \left\lfloor \frac{L+C}{2} \right\rfloor
+    \end{equation}
+    Una vez localizado el bloque candidato en $\lceil \log_2 P_{\text{main}} \rceil$ lecturas, se examina el bloque interno. Si el registro no está en el bloque principal pero pertenece a una cadena de desbordamiento, se navega el área de overflow siguiendo las referencias en disco.
+    \item \textbf{Inserción e Intercalado de punteros:} Si la página principal dispone de espacio libre, el registro añade respetando el ordenamiento local. Si el bloque está lleno, la tupla se escribe al final del área de overflow, y se ajustan los punteros del anterior bloque para intercalar el nuevo elemento dentro de la secuencia lógica.
+    \item \textbf{Reorganización externa:} Para asegurarnos de ser capaces de procesar volúmenes de datos masivos sin sobrepasar los límites en memoria, se usara el método \texttt{reorganize()} implementada en fusión por bloques \textit{(External Merge)}.
+    \begin{enumerate}
+        \item Carga y ordena únicamente los registros del área de overflow en memoria.
+        \item Genera un flujo iterativo que combina secuencialmente los registros del área principal con los del overflow ordenado en $O(N)$.
+        \item Reescribe el archivo principal aplicando un \textbf{Factor de carga de 75\%}, dejando un 25\% de espacio libre en cada página para las inserciones futuras.
+        \item Vacea el área de desbordamiento y reinicia los punteros de control.
+    \end{enumerate}
+
+
+\textbf{Análisis de complejidad I/O:}
+\begin{table}[h]
+\centering
+\caption{Complejidad teorica de I/O para Sequential File}
+\label{tab:seq_complejidad}
+\begin{tabular}{|l|c|c|}
+\hline
+\textbf{Operacion} & \textbf{Lecturas disco} & \textbf{Escrituras disco} \\ \hline
+Busqueda & $O(\log_2 P_{\text{main}}) + k$ & $0$ \\ \hline
+Insercion (en overflow) & $O(\log_2 P_{\text{main}}) + 1$ & $2$ (Main + Overflow) \\ \hline
+Reorganizacion externa & $O(P_{\text{main}} + P_{\text{overflow}})$ & $O(P_{\text{new\_main}})$ \\ \hline
+\end{tabular}
+\end{table}
+
+
+$k$ representa la profundidad de la cadena de punteros en el área de overflow.
+\end{itemize}
 
 \section{Capa de Indexación Relacional}
 \subsection{Árbol $B^+$ en Disco}
 
 Para la indexación avanzada, se implementó un Árbol $B^+$ multinivel que opera
 estrictamente sobre memoria secundaria. La estructura fue diseñada para
-parametrizar de forma dinámica la capacidad de los nodos en función del tamaño
+parametrizar de forma dinámica la capacidad máxima de claves en función del tamaño
 de bloque $B$ indicado por el gestor, optimizando así las transferencias de I/O.
 
-\textbf{Estructura Física de los Nodos:} \\
-Todo nodo interno u hoja inicia con una cabecera de 16 bytes empaquetada
-mediante la librería \texttt{struct} de Python (\texttt{<i i i i>}). Esta
+\textbf{Estructura Física y Metadatos:} \\
+Para garantizar la persistencia de la estructura entre reinicios, el índice reserva
+la \textbf{Página 0} del archivo físico exclusivamente como página de metadatos,
+almacenando únicamente el \texttt{root\_id} (4 bytes).
+
+Todo nodo del árbol (interno u hoja) inicia con una cabecera de \textbf{20 bytes} empaquetada
+mediante la librería \texttt{struct} de Python (formato \texttt{<iiiii>}). Esta
 almacena:
 \begin{itemize}
+    \item \texttt{page\_id}: Identificador físico del bloque.
     \item \texttt{is\_leaf}: Bandera booleana (entero).
     \item \texttt{num\_keys}: Cantidad actual de claves activas en el bloque.
-    \item \texttt{next\_leaf} y \texttt{prev\_leaf}: Punteros de encadenamiento
-    doble, fundamentales para habilitar búsquedas por rango puramente
-    secuenciales a nivel de disco.
+    \item \texttt{next\_page\_id} y \texttt{prev\_page\_id}: Punteros de encadenamiento
+    doble horizontal, fundamentales para habilitar búsquedas por rango secuenciales.
 \end{itemize}
 
-\textbf{Indexación No Agrupada (RIDs):} \\
-Para evitar la duplicación innecesaria de datos y mantener un alto factor de
-ramificación, los nodos hoja no almacenan los registros completos. En su lugar,
-guardan tuplas de 12 bytes conformadas por \texttt{<Key, Page\_ID, Slot\_ID>}.
+\textbf{Nodos Internos e Indexación No Agrupada (RIDs en Hojas):} \\
+Para evitar la duplicación innecesaria de datos, el árbol funciona como un índice no agrupado.
+Los \textbf{nodos hoja} guardan tuplas de 12 bytes conformadas por \texttt{<Key, Page\_ID, Slot\_ID>}.
 Esto permite que el índice devuelva el Record Identifier (RID) exacto al motor
-de consultas, el cual recupera la tupla final desde el \textit{Heap} o
-\textit{Sequential File}.
+de consultas, el cual recupera la tupla final desde la capa física.
+Por otro lado, los \textbf{nodos internos} almacenan únicamente las claves separadoras y un arreglo de
+identificadores de página (hijos). Para evitar el solapamiento binario, los punteros a los hijos
+se empaquetan en un espacio de memoria fijo calculado a partir de la capacidad máxima de claves, garantizando desplazamientos seguros.
 
 \textbf{Operaciones y Costos:}
 \begin{itemize}
     \item \textbf{Inserción:} Se realiza mediante búsqueda descendente. Al
-    superar el \texttt{MAX\_KEYS} de un bloque, se aplica el algoritmo de
+    superar la capacidad máxima del bloque (\texttt{MAX\_KEYS}), se aplica el algoritmo de
     división recursiva (\textit{split}) al 50\%, promoviendo la clave separadora
-    hacia el nodo padre y asignando un nuevo bloque contiguo al final del
-    archivo físico.
+    hacia el nodo padre y solicitando un nuevo bloque contiguo al \texttt{DiskManager}.
     \item \textbf{Búsqueda Puntual:} Limitada estrictamente a la altura del
     árbol $h = O(\log_M N)$ lecturas a disco, mitigado por el uso del
     \texttt{DiskCounter} inyectado desde la capa de almacenamiento.
     \item \textbf{Búsqueda por Rango:} Minimiza severamente el I/O al realizar
     un único descenso hacia la hoja del límite inferior, y a partir de ahí,
-    itera horizontalmente utilizando el puntero \texttt{next\_leaf}, evitando
-    así múltiples descensos desde la raíz.
+    itera horizontalmente utilizando el puntero \texttt{next\_page\_id}, evitando
+    múltiples descensos desde la raíz.
+    \item \textbf{Eliminación:} Se implementó una baja lógica y remoción de entradas directa
+    en el nodo contenedor, disminuyendo el contador \texttt{num\_keys} y reescribiendo la página física.
 \end{itemize}
 
 \subsection{Hashing Dinámico (Extendible Hashing)}
 % Función hash en disco, directorio/buckets y división ante colisiones.
 
+Para la segunda técnica de indexación se implementó \textbf{Extendible Hashing}.
+A diferencia de un esquema de hash estático, donde el número de buckets se fija
+al crear el archivo y cualquier crecimiento posterior degrada el rendimiento por
+acumulación de desbordamiento, esta variante permite que el número de buckets
+crezca de forma incremental conforme aumenta el volumen de datos, sin necesidad
+de reorganizar el archivo completo ni de recalcular una nueva función hash desde
+cero.
+
+\textbf{Estructura física:}
+\begin{itemize}
+    \item \textbf{Página de cabecera del índice:} Es la primera página física
+    del archivo y almacena los metadatos globales de la estructura, empaquetados
+    mediante \texttt{struct} en el formato \texttt{<Iiii} (16 bytes): la
+    profundidad global $D$ (\texttt{global\_depth}), el identificador de la
+    primera página del directorio (\texttt{first\_dir\_page\_id}), la cabecera
+    de la lista de páginas libres reutilizables (\texttt{free\_page\_head}) y el
+    total de entradas activas en el índice (\texttt{total\_entries}).
+
+    \item \textbf{Directorio:} Es un arreglo de $2^D$ punteros a página, donde
+    cada entrada asocia una combinación de bits con el bucket que le
+    corresponde. Se persiste en disco en páginas encadenadas mediante un puntero
+    a la siguiente página (\texttt{<i}, 4 bytes) seguido de un bloque compacto de
+    identificadores de página de 4 bytes cada uno, lo que permite almacenar
+    $\lfloor (B-4)/4 \rfloor$ punteros por página de directorio.
+
+    \item \textbf{Página de bucket:} Cada bucket ocupa exactamente una página
+    física con una cabecera de 12 bytes en formato \texttt{<iIi}: la
+    profundidad local $d$ (\texttt{local\_depth}), el número de entradas activas
+    (\texttt{num\_entries}) y un puntero de encadenamiento
+    (\texttt{next\_page\_id}) que apunta a la primera página de una cadena de
+    desbordamiento cuando el bucket ya no admite más divisiones. Las entradas se
+    empaquetan en el formato \texttt{<qII} (16 bytes): la clave de 64 bits con
+    signo y el $\text{RID} = (\text{page\_id}, \text{slot\_number})$ que la
+    localiza en el Heap File o Sequential File subyacente, siguiendo el mismo
+    esquema de identificación de registro definido para la capa de
+    almacenamiento. La capacidad de un bucket queda entonces determinada por el
+    tamaño de bloque:
+    \begin{equation}
+        N_{\text{bucket}} = \left\lfloor \frac{B - 12}{16} \right\rfloor
+    \end{equation}
+    lo que da 255 entradas por bucket para $B = 4096$ bytes.
+\end{itemize}
+
+\textbf{Función de direccionamiento:}
+La ubicación de un bucket se calcula tomando los $d$ bits menos significativos
+de la clave, es decir $\text{index}(\text{key}, d) = \text{key} \bmod 2^{d}$.
+Esta convención de bits bajos, y no de bits altos, es la que permite que
+duplicar el directorio sea una operación segura: como
+$(\text{key} \bmod 2^{D+1}) \bmod 2^{D} = \text{key} \bmod 2^{D}$ para cualquier
+clave, cada mitad nueva del directorio puede construirse como una copia exacta
+de la mitad vieja sin recalcular ningún puntero existente.
+
+\textbf{Directorio en memoria principal:} El directorio se carga íntegramente a
+RAM una única vez, al abrir el índice, y permanece ahí durante toda la sesión;
+solo se vuelve a escribir a disco cuando una división de bucket o un crecimiento
+de la profundidad global lo modifican. Se optó por este diseño porque releer el
+directorio completo en cada consulta habría inflado artificialmente el costo de
+I/O medido por el \texttt{DiskCounter}, sin reflejar el costo real del
+algoritmo: en un motor de bases de datos real el directorio también se mantiene
+residente en memoria por ser, en el peor caso, un arreglo de unos pocos miles de
+punteros. Bajo este esquema, una búsqueda puntual solo transfiere dos bloques de
+forma constante e independiente del volumen de datos: la página de cabecera del
+índice y la página del bucket exacto que el directorio resuelve, sin recorrer
+estructura alguna.
+
+\textbf{Operaciones:}
+\begin{itemize}
+    \item \textbf{Inserción y división (split):} Se localiza el bucket mediante
+    el directorio y, si dispone de espacio, la entrada se añade directamente. Si
+    el bucket está lleno, se aplica el algoritmo de división: si la profundidad
+    local del bucket coincide con la profundidad global ($d = D$), el
+    directorio se duplica primero ($D \mathrel{+}= 1$); luego se incrementa la
+    profundidad local del bucket ($d \mathrel{+}= 1$), se reserva un bucket
+    hermano, y las entradas existentes se redistribuyen entre ambos según el bit
+    de posición $d-1$ de cada clave. Finalmente se actualizan en el directorio
+    únicamente los punteros correspondientes al rango de índices que compartía
+    el sufijo del bucket original, y se reintenta la inserción. El proceso
+    converge siempre porque la profundidad local aumenta en cada división y está
+    acotada por un límite superior ($d_{\max} = 20$).
+    \item \textbf{Búsqueda:} Acceso directo de costo constante, tal como se
+    describió: una lectura de la página de cabecera y una lectura del bucket
+    señalado por el directorio. Si la clave no aparece entre las entradas
+    principales del bucket y este posee una cadena de desbordamiento, se
+    recorre dicha cadena de forma secuencial.
+    \item \textbf{Eliminación y fusión (merge):} Se localiza y remueve la
+    entrada del bucket correspondiente. Si el bucket queda completamente vacío,
+    se busca su \textit{buddy}, el bucket con el mismo prefijo en profundidad
+    local $d-1$ pero con el bit siguiente invertido; si ambos comparten la
+    misma profundidad local, se fusionan: todos los punteros del directorio que
+    apuntaban al bucket vacío se redirigen al buddy, cuya profundidad local se
+    reduce en uno, y la página liberada se devuelve a una lista de páginas
+    libres propia del índice para ser reutilizada en la siguiente división o en
+    el siguiente crecimiento del directorio, en vez de seguir extendiendo el
+    archivo físico.
+\end{itemize}
+
+\textbf{Mecanismo de desbordamiento:} Como salvaguarda ante colisiones
+patológicas, es decir claves que comparten sus $d_{\max}$ bits menos
+significativos y que, por lo tanto, no pueden separarse por más divisiones que
+se apliquen, un bucket que alcanza la profundidad local máxima deja de dividirse
+y en su lugar encadena páginas de desbordamiento adicionales, replicando la
+técnica de encadenamiento vista para el hashing estático. Este mecanismo es
+estrictamente un último recurso: bajo una distribución de claves razonable, como
+la de un identificador numérico secuencial o pseudoaleatorio, el árbol de
+divisiones nunca se acerca a ese límite antes de separar las claves.
+
+\textbf{Complejidad de I/O:}
+\begin{table}[h]
+\centering
+\caption{Complejidad teorica de I/O para Hashing Dinamico}
+\label{tab:hash_complejidad}
+\begin{tabular}{|l|c|c|}
+\hline
+\textbf{Operacion} & \textbf{Lecturas Disco} & \textbf{Escrituras Disco} \\ \hline
+Busqueda puntual & $O(1)$ (2 bloques constantes) & $0$ \\ \hline
+Insercion sin division & $O(1)$ & $O(1)$ \\ \hline
+Insercion con division & $O(1)$ & $O(1)$ amortizado \\ \hline
+Eliminacion con fusion & $O(1)$ & $O(1)$ \\ \hline
+\end{tabular}
+\end{table}
+
+La única operación que se aparta de este costo constante es una división que
+coincide con $d = D$, porque obliga a reescribir el directorio completo
+($O(2^{D})$ escrituras de página); dado que $D$ crece de forma logarítmica
+respecto al número de claves y esa reescritura ocurre a lo sumo una vez por
+cada vez que el directorio se duplica, el costo amortizado por inserción se
+mantiene constante, tal como reportan los resultados del Experimento 2 en la
+Sección~6.2.
 % ==============================================================================
 % SECCION 5: MOTOR DE CONSULTAS, PARSER SQL Y TELEMETRIA
 % ==============================================================================
@@ -1007,7 +1227,7 @@ diluye cuando son búsquedas puntuales que solo necesitan un registro de los
 setenta y siete que trajo la página.
 
 % ==============================================================================
-% ENTREGABLE 2
+% SECCION 7: EXTENSION MULTIMODAL DEL MOTOR (bloque D del entregable 2)
 % ==============================================================================
 
 \input{entregable2_motor}
@@ -1047,10 +1267,12 @@ planificar estaba costando entrada y salida porque el planificador descendía el
 en cuenta el área de desbordamiento, lo que hacía prometer once bloques donde se
 leían ochocientos treinta y cuatro.
 
-Queda pendiente para el segundo entregable llevar el mismo criterio a los
-índices, empezando por mantener en memoria el camino entre inserciones
-consecutivas, y extender el árbol B$^+$ para aceptar claves no enteras y
-repetidas, que hoy lo limitan a indexar claves primarias.
+El entregable 2 repitió ese patrón a mayor escala. Las tres familias de búsqueda
+nuevas funcionaban sobre las tablas de prueba y fallaron al cargar los 13\,000
+rostros del conjunto definitivo, por constantes que a escala de cinco filas
+parecían razonables. La más instructiva fue la decisión entre pre y post
+filtering: la planteamos como una comparación de costos y resultó depender de
+algo anterior, que es si la ruta puede responder la consulta completa.
 
 % ==============================================================================
 % ANEXOS
@@ -1070,7 +1292,7 @@ repetidas, que hoy lo limitan a indexar claves primarias.
     \vspace{0.3cm}
 
     \item \textbf{Video demostrativo:} \\
-    \url{https://youtu.be/enlace-al-video} \\
+    \url{https://drive.google.com/drive/folders/1LHomcNZRXI2bdWRjWiFyJOC0bDKInsyk?usp=sharing} \\
     \textit{Incluye la inspección de archivos binarios en disco, la ejecución de
     consultas en el cliente web con sus métricas de entrada y salida, y la
     presentación de los resultados del benchmark automatizado.}
@@ -1078,7 +1300,7 @@ repetidas, que hoy lo limitan a indexar claves primarias.
 
 \subsection{Instrucciones de despliegue}
 
-El sistema levanta cuatro servicios en un solo paso:
+El sistema levanta cinco servicios en un solo paso:
 
 \begin{lstlisting}[language=bash, caption={Ejecución del sistema}]
 git clone https://github.com/MargioUTEC/Proyecto1-BaseDatosII-20262.git
@@ -1089,12 +1311,15 @@ docker compose up --build
 
 La consola SQL queda en \texttt{http://localhost:8080} y es el punto de entrada.
 El motor de consultas escucha en el puerto 8001, el servicio de almacenamiento
-físico en el 8000 y el de hashing dinámico en el 8002.
+físico en el 8000, el de hashing dinámico en el 8002 y el bloque vectorial en el
+8003. La pantalla de identificación facial queda en
+\texttt{http://localhost:8080/identificacion.html}.
 
 \subsection{Reproducción de los experimentos}
 
 \begin{lstlisting}[language=bash, caption={Arnés de experimentación}]
 python benchmarks/experiments.py --backend disk
+python benchmarks/experimento9_hibrido.py
 \end{lstlisting}
 
 Deja un archivo CSV por experimento y un resumen en Markdown dentro del
@@ -1112,6 +1337,8 @@ cuatro experimentos con volúmenes menores para una verificación rápida.
 \textbf{Script} & \textbf{Función} \\
 \midrule
 \texttt{scripts/smoke.sh} & Comprueba los cuatro servicios y las invariantes del motor \\
+\texttt{scripts/verificar\_p2.py} & Corre una consulta de cada familia y revisa el plan elegido \\
+\texttt{scripts/servir\_local.py} & Levanta el motor y el cliente en un solo origen, sin Docker \\
 \texttt{scripts/demo.sh} & Recorrido guiado de diez pasos, con \texttt{-{}-pausa} para narrar \\
 \texttt{scripts/inspect\_page.py} & Abre un bloque binario y muestra cabecera, slots y registros \\
 \texttt{scripts/sql/} & Guiones SQL para la consola o para el cliente de consola \\
