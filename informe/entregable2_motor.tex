@@ -444,12 +444,13 @@ del índice y nada la estrategia:
 
 \begin{table}[H]
 \centering
-\caption{Efecto de \texttt{nprobe} sobre el sondeo y sobre la decisión}
+\caption{Efecto de \texttt{nprobe} sobre el sondeo y sobre la decisión. Las dos
+últimas columnas corresponden a la consulta con el filtro
+\texttt{id \textless{} 1000}.}
 \begin{tabular}{@{}rrrrlr@{}}
 \toprule
 \textbf{nprobe} & \textbf{Candidatos} & \textbf{\% colección} &
-\textbf{ms sin filtro} & \textbf{Estrategia con \texttt{id \textless{} 1000}} &
-\textbf{Bloques} \\
+\textbf{ms} & \textbf{Estrategia} & \textbf{Bloques} \\
 \midrule
 1 & 353 & 2{,}72 & 1{,}13 & pre & 128 \\
 2 & 607 & 4{,}67 & 1{,}17 & pre & 128 \\
