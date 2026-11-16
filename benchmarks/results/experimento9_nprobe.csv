@@ -1,0 +1,6 @@
+nprobe,candidatos,fraccion_pct,ms_sin_filtro,estrategia_id_lt_1000,bloques_id_lt_1000,ms_id_lt_1000
+1,353,2.72,1.131,pre,128,25.52
+2,607,4.67,1.169,pre,128,25.718
+4,1340,10.31,1.216,pre,128,25.874
+8,2345,18.04,1.228,pre,128,25.922
+16,4474,34.42,1.592,pre,128,25.471
