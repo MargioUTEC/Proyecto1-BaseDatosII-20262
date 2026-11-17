@@ -17,6 +17,12 @@
 \usepackage{listings}
 \usepackage{xcolor}
 \usepackage{hyperref}
+% xurl deja cortar una URL larga en cualquier punto; sin el, el enlace de
+% Drive de los anexos se sale del margen derecho.
+\usepackage{xurl}
+% Margen de maniobra para los parrafos con un \texttt largo que no puede
+% partirse; sin esto un par de parrafos se salen del margen derecho.
+\emergencystretch=3em
 \usepackage{fancyhdr}
 \usepackage{float}
 
@@ -1232,6 +1238,12 @@ setenta y siete que trajo la página.
 
 \input{entregable2_motor}
 
+% ==============================================================================
+% SECCION 8: MODULO DE RECUPERACION DE TEXTO (bloque B del entregable 2)
+% ==============================================================================
+
+\input{entregable2_textual}
+
 \section{Conclusiones}
 
 El trabajo confirmó que en un gestor sobre memoria secundaria las decisiones que
@@ -1319,6 +1331,7 @@ físico en el 8000, el de hashing dinámico en el 8002 y el bloque vectorial en 
 
 \begin{lstlisting}[language=bash, caption={Arnés de experimentación}]
 python benchmarks/experiments.py --backend disk
+python benchmarks/experimento6_textual.py --pg-dsn postgresql://...
 python benchmarks/experimento9_hibrido.py
 \end{lstlisting}
 

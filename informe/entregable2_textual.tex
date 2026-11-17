@@ -1,0 +1,427 @@
+% Seccion 8 modulo de recuperacion de texto
+
+\section{Módulo de Recuperación de Texto: Índice Invertido en Disco}
+
+Una búsqueda de texto funciona distinto a las consultas del primer entregable.
+No compara una columna contra un valor, sino que pide los documentos que
+contienen ciertas palabras y, además, quiere saber cuáles son los más
+relevantes. Para responder esto sin leer la tabla completa construimos un índice
+invertido que se guarda en disco con las mismas reglas que el resto del motor:
+bloques de 4\,096 bytes, acceso con \texttt{seek} y \texttt{struct}, y cada
+bloque leído o escrito contado por el \texttt{DiskCounter}.
+
+\subsection{Preprocesamiento del Texto}
+
+Los documentos y las consultas siempre pasan por el mismo analizador. Si no
+fuera así, una palabra de la consulta podría no coincidir nunca con la forma en
+que se guardó en el índice. El analizador aplica cinco pasos:
+
+\begin{enumerate}
+    \item \textbf{Minúsculas (case folding):} todo el texto pasa a minúsculas.
+    \item \textbf{Tokenización:} el texto se separa en palabras; la puntuación
+    sirve de separador y los números sueltos se descartan.
+    \item \textbf{Normalización:} se quitan las tildes.
+    \item \textbf{Palabras vacías (stopwords):} se descartan las 186 palabras de
+    la lista en español (\texttt{stoplist\_es.txt}), como "el", "de" o "que".
+    \item \textbf{Stemming:} cada palabra se reduce a su raíz con el algoritmo
+    Snowball en español de \texttt{nltk}. Por ejemplo, "cámaras" queda en
+    \texttt{cam} y "verificación" en \texttt{verif}.
+\end{enumerate}
+
+El orden entre el tercer y el quinto paso lo descubrimos probando. Al principio
+sacábamos la raíz de la palabra con tilde y quitábamos la tilde después. Con eso
+"fotografía" quedaba en \texttt{fotograf}, pero "fotografia", escrita sin tilde
+en una consulta, quedaba en \texttt{fotografi}, así que las dos nunca
+coincidían. Al quitar las tildes antes de sacar la raíz, el resultado ya no
+depende de cómo escriba el usuario.
+
+\subsection{Diseño Físico del Índice}
+
+El índice se guarda en tres archivos binarios. La página 0 de cada uno es una
+cabecera con un identificador del archivo y los totales; el resto de páginas
+guarda entradas de tamaño fijo:
+
+\begin{table}[H]
+\centering
+\caption{Archivos del índice invertido}
+\begin{tabularx}{\textwidth}{@{}llX@{}}
+\toprule
+\textbf{Archivo} & \textbf{Entrada} & \textbf{Contenido} \\
+\midrule
+\texttt{vocab.dic} & 52 B & \texttt{<término 32s, df, cf, offset, nbytes>}, ordenadas por
+término, 78 por página. Al final, un directorio con el primer término de cada página \\
+\texttt{postings.inv} & 8 B & listas de posteo \texttt{<doc\_id, tf>} una tras otra,
+cada una ordenada por \texttt{doc\_id} \\
+\texttt{docs.bin} & 20 B & \texttt{<RID, norma L2, longitud>} de cada documento,
+204 por página \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Tres decisiones determinan cuánto cuesta una consulta:
+
+\begin{itemize}
+    \item \textbf{Encontrar un término cuesta una sola lectura.} Al abrir el
+    índice se carga en memoria el directorio de \texttt{vocab.dic}, igual que se
+    hace con la raíz de un árbol B$^+$. Con ese directorio se sabe en qué página
+    está el término, y dentro de esa página se busca con búsqueda binaria.
+    \item \textbf{Las listas se guardan una detrás de otra, sin dejar espacio
+    vacío.} Un término que aparece en tres documentos ocupa 24 bytes, no una
+    página entera. Por eso leer una lista cuesta solo las páginas que ocupa.
+    \item \textbf{La norma de cada documento se calcula al construir el índice.}
+    Para calcular el coseno se necesita la norma de cada documento candidato. Al
+    tenerla guardada en \texttt{docs.bin} se puede ordenar por relevancia sin
+    leer la tabla, y esto es lo que más marca la diferencia frente a PostgreSQL
+    en el experimento 6.
+\end{itemize}
+
+El índice guarda los RID de las filas de la tabla, así que después de buscar en
+el índice cada resultado se lee de la tabla por su RID, igual que en cualquier
+índice secundario.
+
+\subsection{Construcción con SPIMI}
+
+El índice se construye recorriendo la colección una sola vez, con el método
+SPIMI (\textit{Single-Pass In-Memory Indexing}):
+
+\begin{enumerate}
+    \item Cada documento pasa por el analizador y sus términos se agregan a un
+    diccionario en memoria, donde cada término guarda su lista
+    \texttt{[(doc\_id, tf)]}.
+    \item Cuando el diccionario llega a 200\,000 posteos, se ordena por término y
+    se guarda en disco como un bloque, también en páginas de 4\,096 bytes.
+    \item Al terminar, se juntan todos los bloques en uno solo usando un heap
+    (\textit{k-way merge}). Por cada término se unen sus posteos, se escriben en
+    \texttt{postings.inv}, se agrega su entrada a \texttt{vocab.dic} y se suma su
+    parte a la norma de cada documento.
+    \item Los tres archivos nuevos reemplazan a los anteriores de una sola vez,
+    para que el índice nunca quede a medio escribir.
+\end{enumerate}
+
+Agregar documentos a un índice que ya existe usa el mismo proceso: los bloques
+nuevos se juntan con el índice actual, que ya está ordenado por término y se
+trata como un bloque más. Así no hace falta volver a analizar los documentos que
+ya estaban indexados.
+
+\subsection{Consultas Booleanas y Ranking por Coseno}
+
+El peso de un término $t$ en un documento $d$ es
+\begin{equation}
+    w_{t,d} = \left(1 + \log_{10} \text{tf}_{t,d}\right) \cdot \log_{10} \frac{N}{\text{df}_t},
+\end{equation}
+y la relevancia de $d$ para la consulta $q$ es la similitud de coseno
+\begin{equation}
+    \cos(q, d) = \frac{\sum_{t \in q} w_{t,q}\, w_{t,d}}{\lVert q \rVert_2 \, \lVert d \rVert_2}.
+\end{equation}
+Solo se recorren las listas de los términos que aparecen en la consulta, y los
+$K$ documentos con mayor puntaje se obtienen con un heap.
+
+Las consultas booleanas aceptan \texttt{AND}, \texttt{OR}, \texttt{NOT} y
+paréntesis, y \texttt{NOT} se evalúa primero, luego \texttt{AND} y al final
+\texttt{OR}. Cada operador recorre dos listas ordenadas al mismo tiempo con dos
+punteros, así que su costo es $O(n + m)$: \texttt{AND} se queda con los
+documentos que están en ambas listas, \texttt{OR} con los que están en alguna y
+\texttt{AND NOT} con los de la primera que no están en la segunda. Si la
+consulta no tiene operadores, se trata como texto libre: basta con que un
+documento tenga alguna de las palabras, y el coseno decide el orden.
+
+Para comprobar que el índice funciona bien, programamos también la misma
+búsqueda sin índice, que recorre todos los documentos y los analiza uno por
+uno. Las pruebas confirman que los dos caminos devuelven los mismos documentos
+con los mismos puntajes en diez consultas de todos los tipos.
+
+\subsection{Integración con el Motor}
+
+\begin{lstlisting}[language=SQL, caption={Índice invertido y consulta textual}]
+CREATE INDEX ix_cuerpo ON expedientes (cuerpo)
+  USING INVERTED WITH (scoring = 'TFIDF_COSINE', language = 'spanish');
+
+SELECT id, tipo, COSINE_SCORE() AS relevancia
+FROM expedientes
+WHERE cuerpo MATCH 'verificacion AND rostro AND NOT mascarilla'
+ORDER BY relevancia DESC
+LIMIT 10;
+\end{lstlisting}
+
+\begin{table}[H]
+\centering
+\caption{Plan elegido para una consulta textual}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Situación} & \textbf{Plan} \\
+\midrule
+La columna tiene un índice \texttt{INVERTED} & \texttt{InvertedIndexScan}, y luego una lectura por cada RID \\
+La columna no tiene índice & \texttt{FullTextScan}: lee todas las páginas y analiza cada texto \\
+\texttt{MATCH} junto a otra condición & se busca primero con el \texttt{MATCH} y la otra condición se aplica después (\texttt{Filter}) \\
+Orden por el puntaje con \texttt{LIMIT} $k$ & el índice devuelve directamente los $k$ mejores (Top-$K$) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+El plan muestra por separado los bloques leídos del índice y los de la tabla, y
+los del índice se dividen en vocabulario, listas de posteo y normas. Las filas
+que se insertan después de crear el índice se agregan como un bloque nuevo antes
+de la siguiente búsqueda. Cuando se borra una fila, su entrada se queda en el
+índice, pero al leerla por su RID la tabla no devuelve nada y se descarta.
+
+En la primera versión, después de leer cada fila volvíamos a analizar su texto
+para confirmar que cumplía la consulta. Lo hacíamos por si el índice apuntaba a
+una fila borrada, pero esas filas ya se descartan al leerlas, y esa revisión
+extra era lo que más tiempo tomaba en las consultas que devuelven muchos
+documentos. Por eso la quitamos.
+
+\subsection{Corpus de Expedientes}
+
+Para tener texto en el cual buscar, generamos 25\,000 expedientes en español
+asociados a las identidades del sistema biométrico. Usamos una semilla fija para
+que siempre se genere el mismo corpus. Hay ocho tipos de expediente: registros
+de acceso, verificaciones biométricas, renovaciones de credencial, fallas
+técnicas de cámaras, visitas, auditorías, solicitudes de protección de datos y
+alertas. Cada persona aparece con un código (\texttt{P00042}), sin nombres. En
+promedio cada expediente ocupa 470 bytes.
+
+La primera versión del corpus tenía solo 279 palabras distintas, y ese número no
+aumentaba al agregar más documentos. Eso no se parece a un texto real y habría
+dado resultados engañosos en el experimento. Por eso agregamos observaciones con
+un vocabulario más amplio, donde pocas palabras se repiten mucho y la mayoría
+aparece poco (distribución de tipo Zipf), además de códigos únicos de equipos y
+tickets. Con eso el vocabulario sigue creciendo al agregar documentos, aunque
+cada vez más despacio, como describe la ley de Heaps: pasa de 1\,791 términos
+con mil documentos a 21\,412 con veinticinco mil.
+
+\subsection{Experimento 6: Índice Invertido frente a Full Text Scan y GIN}
+
+\begin{lstlisting}[language=bash, caption={Ejecución del experimento}]
+python benchmarks/experimento6_textual.py --pg-dsn postgresql://...
+\end{lstlisting}
+
+El script construye el índice con colecciones cada vez más grandes y luego
+ejecuta 60 consultas: \texttt{AND}, \texttt{OR}, \texttt{AND NOT} y Top-10 por
+relevancia, cada una con 1, 3 y 5 términos y cinco consultas distintas por
+combinación. Cada consulta se ejecuta por SQL de tres formas:
+
+\begin{itemize}
+    \item sobre la tabla \texttt{expedientes} del motor, sin índice
+    (\texttt{FullTextScan});
+    \item sobre la misma tabla, con el índice invertido;
+    \item en PostgreSQL 18, con \texttt{to\_tsvector('spanish', cuerpo)} y un
+    índice GIN.
+\end{itemize}
+
+La tabla del motor tiene 20\,000 filas en 6\,666 páginas de 4\,096 bytes. En
+PostgreSQL los bloques son de 8\,192 bytes y los valores se obtuvieron con
+\texttt{EXPLAIN (ANALYZE, BUFFERS)}, con los datos ya cargados en caché. Cada
+valor es el promedio de las cinco consultas de su combinación.
+
+\subsubsection{Construcción y tamaño en disco}
+
+\begin{table}[H]
+\centering
+\caption{Construcción del índice invertido frente al índice GIN.
+\textbf{Bloques} son los bloques intermedios que escribió SPIMI antes de
+juntarlos.}
+\begin{tabular}{@{}rrrrrrr@{}}
+\toprule
+\textbf{N} & \textbf{Términos} & \textbf{Bloques} & \textbf{SPIMI (s)} &
+\textbf{Índice (KiB)} & \textbf{GIN (s)} & \textbf{GIN (KiB)} \\
+\midrule
+1\,000 & 1\,791 & 1 & 0{,}37 & 352 & 0{,}12 & 224 \\
+2\,000 & 3\,033 & 1 & 0{,}53 & 660 & 0{,}12 & 392 \\
+5\,000 & 6\,204 & 1 & 1{,}31 & 1\,556 & 0{,}31 & 880 \\
+10\,000 & 10\,719 & 2 & 2{,}44 & 3\,024 & 0{,}66 & 1\,552 \\
+20\,000 & 18\,082 & 4 & 4{,}90 & 5\,844 & 1{,}41 & 3\,096 \\
+25\,000 & 21\,412 & 4 & 6{,}01 & 7\,240 & 2{,}40 & 3\,888 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+La columna del índice suma \texttt{vocab.dic} y \texttt{postings.inv}.
+\texttt{docs.bin} ocupa 496~KiB adicionales con 25\,000 documentos.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[figura,
+    group style={group size=2 by 1, horizontal sep=1.6cm},
+    width=0.5\linewidth, height=6cm,
+    xlabel={Documentos ($N$)},
+    xtick={1000,10000,20000,25000},
+    xticklabels={1\,000,10\,000,20\,000,25\,000},
+    xticklabel style={rotate=30, anchor=east},
+    scaled x ticks=false,
+    legend pos=north west,
+]
+\nextgroupplot[ylabel={Tiempo de construcción (s)}]
+\addplot[cSeq, mark=triangle*] coordinates {(1000,0.37)(2000,0.53)(5000,1.31)(10000,2.44)(20000,4.90)(25000,6.01)};
+\addlegendentry{SPIMI}
+\addplot[cHash, mark=diamond*] coordinates {(1000,0.12)(2000,0.12)(5000,0.31)(10000,0.66)(20000,1.41)(25000,2.40)};
+\addlegendentry{GIN}
+\nextgroupplot[ylabel={Tamaño en disco (MiB)}]
+\addplot[cSeq, mark=triangle*] coordinates {(1000,0.34)(2000,0.64)(5000,1.52)(10000,2.95)(20000,5.71)(25000,7.07)};
+\addlegendentry{vocab + postings}
+\addplot[cHash, mark=diamond*] coordinates {(1000,0.22)(2000,0.38)(5000,0.86)(10000,1.52)(20000,3.02)(25000,3.80)};
+\addlegendentry{GIN}
+\end{groupplot}
+\end{tikzpicture}
+\caption{Tiempo de construcción y tamaño en disco según el número de
+documentos. Los dos índices crecen de forma lineal, pero GIN lo hace más
+despacio.}
+\label{fig:e6-construccion}
+\end{figure}
+
+Los dos índices crecen de forma lineal con el número de documentos. El índice
+invertido ocupa unos 296 bytes por documento, y el 85 por ciento de ese espacio
+es \texttt{postings.inv}, porque cada posteo ocupa ocho bytes sin comprimir.
+\texttt{vocab.dic} crece más lento porque el número de palabras distintas
+también crece más lento que el número de documentos.
+
+GIN ocupa más o menos la mitad y se construye entre 2,5 y 4 veces más rápido.
+La diferencia no está en el método sino en cómo se guardan los datos: GIN
+comprime sus listas (codificación delta) y está programado en C, mientras que
+nuestras listas guardan los números enteros de 32 bits sin comprimir. Comprimir
+las listas de la misma forma es la mejora más directa que queda pendiente, y
+reduciría tanto el tamaño como las lecturas.
+
+\subsubsection{Consultas}
+
+\begin{table}[H]
+\centering
+\caption{Bloques leídos y tiempo promedio con $N = 20\,000$. En el índice
+invertido, los bloques se separan en índice + tabla.}
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+& & \multicolumn{2}{c}{\textbf{Full Text Scan}} &
+\multicolumn{2}{c}{\textbf{Índice invertido}} &
+\multicolumn{2}{c}{\textbf{GIN}} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(l){7-8}
+\textbf{Consulta} & \textbf{Filas} & \textbf{Bloques} & \textbf{ms} &
+\textbf{Bloques} & \textbf{ms} & \textbf{Bloques} & \textbf{ms} \\
+\midrule
+AND, 1 & 5\,900 & 6\,666 & 8\,037 & 112 + 5\,899 & 4\,515 & 2\,055 & 3{,}7 \\
+AND, 3 & 25 & 6\,666 & 5\,280 & 45 + 25 & 10{,}6 & 35 & 0{,}2 \\
+AND, 5 & 1 & 6\,666 & 5\,294 & 48 + 1 & 9{,}9 & 19 & 0{,}4 \\
+OR, 1 & 2\,484 & 6\,666 & 12\,088 & 54 + 2\,484 & 1\,801 & 698 & 2{,}7 \\
+OR, 3 & 8\,070 & 6\,666 & 5\,390 & 121 + 8\,070 & 2\,000 & 2\,320 & 5{,}9 \\
+OR, 5 & 15\,429 & 6\,666 & 9\,564 & 155 + 15\,428 & 3\,386 & 2\,688 & 20{,}9 \\
+AND NOT, 1 & 16\,709 & 6\,666 & 8\,265 & 107 + 16\,707 & 9\,386 & 2\,688 & 11{,}8 \\
+AND NOT, 3 & 184 & 6\,666 & 5\,198 & 85 + 184 & 41{,}7 & 169 & 0{,}2 \\
+AND NOT, 5 & 0 & 6\,666 & 11\,329 & 45 + 0 & 6{,}2 & 17 & 0{,}1 \\
+Top-10, 1 & 10 & 6\,666 & 8\,835 & 113 + 10 & 14{,}2 & 1\,933 & 8{,}1 \\
+Top-10, 3 & 10 & 6\,666 & 5\,456 & 129 + 10 & 25{,}1 & 2\,345 & 20{,}6 \\
+Top-10, 5 & 10 & 6\,666 & 16\,053 & 153 + 10 & 34{,}7 & 2\,688 & 37{,}4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[figura,
+    height=7cm,
+    ybar, bar width=3.2pt,
+    ymode=log, log origin=infty,
+    ymin=10, ymax=40000,
+    ylabel={Bloques leídos},
+    symbolic x coords={A1,A3,A5,O1,O3,O5,N1,N3,N5,T1,T3,T5},
+    xtick=data,
+    xticklabels={AND 1,AND 3,AND 5,OR 1,OR 3,OR 5,NOT 1,NOT 3,NOT 5,Top 1,Top 3,Top 5},
+    xticklabel style={rotate=40, anchor=east},
+    ytick={10,100,1000,10000},
+    yticklabels={10,100,$10^3$,$10^4$},
+    enlarge x limits=0.05,
+    legend columns=3,
+    legend style={at={(0.5,1.03)}, anchor=south},
+]
+\addplot[cHeap, fill=cHeap!70] coordinates {(A1,6666)(A3,6666)(A5,6666)(O1,6666)(O3,6666)(O5,6666)(N1,6666)(N3,6666)(N5,6666)(T1,6666)(T3,6666)(T5,6666)};
+\addlegendentry{Full Text Scan}
+\addplot[cSeq, fill=cSeq!70] coordinates {(A1,6011)(A3,70)(A5,49)(O1,2538)(O3,8191)(O5,15583)(N1,16815)(N3,269)(N5,45)(T1,123)(T3,139)(T5,163)};
+\addlegendentry{Índice invertido}
+\addplot[cHash, fill=cHash!70] coordinates {(A1,2055)(A3,35)(A5,19)(O1,698)(O3,2320)(O5,2688)(N1,2688)(N3,169)(N5,17)(T1,1933)(T3,2345)(T5,2688)};
+\addlegendentry{GIN (bloques de 8 KB)}
+\end{axis}
+\end{tikzpicture}
+\caption{Bloques leídos por tipo de consulta y número de términos, en escala
+logarítmica. NOT corresponde a las consultas \texttt{AND NOT}. Sin índice
+siempre se leen las 6\,666 páginas; con el índice invertido se leen hasta cien
+veces menos cuando la consulta devuelve pocos documentos, pero más cuando
+devuelve una buena parte de la tabla.}
+\label{fig:e6-bloques}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[figura,
+    height=7cm,
+    ybar, bar width=3.2pt,
+    ymode=log, log origin=infty,
+    ymin=0.05, ymax=60000,
+    ylabel={Tiempo promedio (ms)},
+    symbolic x coords={A1,A3,A5,O1,O3,O5,N1,N3,N5,T1,T3,T5},
+    xtick=data,
+    xticklabels={AND 1,AND 3,AND 5,OR 1,OR 3,OR 5,NOT 1,NOT 3,NOT 5,Top 1,Top 3,Top 5},
+    xticklabel style={rotate=40, anchor=east},
+    ytick={0.1,1,10,100,1000,10000},
+    yticklabels={0{,}1,1,10,100,$10^3$,$10^4$},
+    enlarge x limits=0.05,
+    legend columns=3,
+    legend style={at={(0.5,1.03)}, anchor=south},
+]
+\addplot[cHeap, fill=cHeap!70] coordinates {(A1,8037)(A3,5280)(A5,5294)(O1,12088)(O3,5390)(O5,9564)(N1,8265)(N3,5198)(N5,11329)(T1,8835)(T3,5456)(T5,16053)};
+\addlegendentry{Full Text Scan}
+\addplot[cSeq, fill=cSeq!70] coordinates {(A1,4515)(A3,10.6)(A5,9.9)(O1,1801)(O3,2000)(O5,3386)(N1,9386)(N3,41.7)(N5,6.2)(T1,14.2)(T3,25.1)(T5,34.7)};
+\addlegendentry{Índice invertido}
+\addplot[cHash, fill=cHash!70] coordinates {(A1,3.7)(A3,0.2)(A5,0.4)(O1,2.7)(O3,5.9)(O5,20.9)(N1,11.8)(N3,0.2)(N5,0.1)(T1,8.1)(T3,20.6)(T5,37.4)};
+\addlegendentry{GIN}
+\end{axis}
+\end{tikzpicture}
+\caption{Tiempo promedio por tipo de consulta, en escala logarítmica. En el
+Top-10 de tres y cinco términos el índice invertido y GIN tardan casi lo mismo.}
+\label{fig:e6-latencia}
+\end{figure}
+
+Sin índice, todas las consultas cuestan lo mismo: el \texttt{FullTextScan} lee
+las 6\,666 páginas y analiza los 20\,000 textos sin importar cuántos documentos
+devuelva, y por eso tarda varios segundos. Los tiempos del motor cambiaron un
+poco entre una ejecución y otra según qué tan ocupada estaba la computadora,
+pero las lecturas siempre fueron las mismas, porque las cuenta el
+\texttt{DiskCounter}.
+
+Cuando la consulta devuelve pocos documentos, el índice invertido es mucho más
+rápido. En \texttt{AND} y \texttt{AND NOT} de tres y cinco términos lee entre 45
+y 269 páginas en vez de 6\,666, y responde en milisegundos en lugar de segundos.
+En el Top-10 solo se leen de la tabla las diez filas que se devuelven. El resto
+son lecturas del índice (las listas de posteo y las normas de los candidatos),
+por eso el costo sube un poco con cada término que se agrega: 123, 139 y 163
+bloques.
+
+Cuando la consulta devuelve una buena parte de la tabla, el índice resulta más
+lento que no usarlo. Pasa con \texttt{OR} de palabras muy comunes y con
+\texttt{AND NOT} de un solo término, que equivale a pedir todos los documentos
+que no tienen esa palabra. El índice en sí lee poco, entre 54 y 155 páginas; el
+problema está en la tabla. Cada fila del resultado se lee por separado con su
+RID, y 15\,428 lecturas sueltas son más que las 6\,666 páginas de leer la tabla
+completa. Es lo mismo que pasó con el árbol B$^+$ en el experimento 3, y por la
+misma razón. Por ahora el planificador usa el índice siempre que existe. Como
+\texttt{vocab.dic} ya guarda en cuántos documentos aparece cada término
+(\texttt{df}), el planificador podría usar ese dato para estimar el costo y
+elegir leer la tabla completa en estos casos.
+
+Frente a GIN, en las consultas booleanas gana PostgreSQL. Es más rápido en todas
+y lee menos en las que devuelven muchos documentos, porque tiene un buffer pool,
+comprime sus listas y usa un \textit{bitmap heap scan}, que lee cada página de la
+tabla una sola vez en lugar de una vez por fila. En el ranking el resultado
+cambia. En el Top-10 de tres y cinco términos nuestro índice tarda casi lo mismo
+que GIN (25 frente a 21~ms y 35 frente a 37~ms), pero lee entre 15 y 17 veces
+menos bloques: 139 frente a 2\,345 y 163 frente a 2\,688. Esto pasa porque GIN
+solo encuentra los documentos; para ordenarlos, \texttt{ts\_rank} tiene que leer
+de la tabla el \texttt{tsvector} de cada candidato y ordenarlos todos antes de
+aplicar el \texttt{LIMIT}. Nuestro índice, en cambio, ordena sin leer la tabla
+gracias a las normas guardadas en \texttt{docs.bin}, y esa fue la decisión de
+diseño que más ayudó.
+
+En algunas consultas el número de filas del motor y el de PostgreSQL no coincide
+exactamente, por ejemplo 8\,070 frente a 7\,984 en \texttt{OR} de tres términos.
+Esto se debe a que las dos configuraciones en español no son iguales: nuestro
+analizador quita las tildes antes de sacar la raíz y usa su propia lista de
+palabras vacías.
