@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -114,6 +115,48 @@
     </div>
   </section>
 
+  <!-- 5. VISOR ESPACIAL -->
+  <section class="panel espacial" aria-labelledby="tituloEspacial">
+    <div class="panel-cab">
+      <h2 id="tituloEspacial">Visor espacial</h2>
+      <span class="etiqueta" id="estadoEspacial">Selecciona una consulta</span>
+    </div>
+    <div class="panel-cuerpo espacial-cuerpo">
+      <div class="espacial-controles">
+        <label>Tabla<select id="espTabla" aria-label="Tabla espacial"></select></label>
+        <label>Columna<select id="espColumna" aria-label="Columna de puntos"></select></label>
+        <label>Consulta<select id="espOperacion" aria-label="Tipo de consulta espacial">
+          <option value="radius">Radio</option>
+          <option value="window">Ventana</option>
+        </select></label>
+      </div>
+      <div class="espacial-parametros" id="paramRadio">
+        <label>Centro X / lon<input id="centroX" type="number" step="any" value="-77.0282"></label>
+        <label>Centro Y / lat<input id="centroY" type="number" step="any" value="-12.1354"></label>
+        <label>Radio (grados)<input id="radio" type="number" min="0" step="any" value="0.05"></label>
+      </div>
+      <div class="espacial-parametros" id="paramVentana" hidden>
+        <label>X min<input id="xmin" type="number" step="any"></label>
+        <label>Y min<input id="ymin" type="number" step="any"></label>
+        <label>X max<input id="xmax" type="number" step="any"></label>
+        <label>Y max<input id="ymax" type="number" step="any"></label>
+        <button class="btn btn-secundario" id="dibujarVentana" type="button">Definir con 2 clics</button>
+      </div>
+      <div class="espacial-acciones">
+        <label class="check-mbr"><input id="mostrarMbr" type="checkbox"> Mostrar MBR</label>
+        <button class="btn" id="buscarEspacial" type="button">Buscar</button>
+      </div>
+      <div id="mapa" role="application" aria-label="Mapa de resultados espaciales"></div>
+      <dl class="metricas-espaciales" id="metricasEspaciales" aria-live="polite">
+        <div><dt>Resultados</dt><dd id="espFilas">—</dd></div>
+        <div><dt>I/O índice</dt><dd id="espIndice">—</dd></div>
+        <div><dt>I/O tabla</dt><dd id="espTablaIO">—</dd></div>
+        <div><dt>Tiempo</dt><dd id="espTiempo">—</dd></div>
+      </dl>
+      <p class="aviso-espacial" id="avisoEspacial" hidden></p>
+    </div>
+  </section>
+
 </main>
 
 <footer class="pie">
@@ -121,6 +164,7 @@
   <span class="pie-der" id="pieCosto"></span>
 </footer>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -1,10 +1,12 @@
 """REST surface consumed by the web client.
 
-Three endpoints, matching the contract the frontend module expects:
+REST endpoints consumed by the web client, including the spatial map query:
 
     POST /api/query              run one statement, return rows plus cost
     GET  /api/tables             catalog listing with schemas and indexes
     POST /api/tables/reorganize  rebuild the ordered area of a Sequential File
+    POST /api/text/analyze       pipeline lexico (tokens, stopwords, raices) de un texto
+    GET  /api/text/index/{name}  estructura fisica de un indice invertido
 """
 
 from __future__ import annotations
@@ -22,6 +24,8 @@ from .schemas import (
     QueryRequest,
     QueryResponse,
     ReorganizeRequest,
+    SpatialQueryRequest,
+    SpatialQueryResponse,
 )
 
 
@@ -56,6 +60,31 @@ def create_app() -> FastAPI:
     @app.post("/api/query", response_model=QueryResponse)
     async def run_query(request: QueryRequest) -> dict:
         return app.state.engine.execute(request.sql).to_dict()
+
+    @app.post("/api/spatial/query", response_model=SpatialQueryResponse)
+    async def run_spatial_query(request: SpatialQueryRequest) -> dict:
+        return app.state.engine.spatial_query(
+            table=request.table,
+            column=request.column,
+            operation=request.operation,
+            center=request.center,
+            radius=request.radius,
+            window=request.window,
+            include_mbrs=request.include_mbrs,
+        )
+
+    @app.post("/api/text/analyze")
+    async def analyze_text(request: dict) -> dict:
+        from ..textsearch import analyzer
+
+        current = analyzer(request.get("language"))
+        text = str(request.get("text", ""))
+        return {"analyzer": current.describe(), "steps": current.trace(text),
+                "terms": current.tokens(text)}
+
+    @app.get("/api/text/index/{name}")
+    async def text_index(name: str) -> dict:
+        return app.state.engine.text_index(name)
 
     @app.get("/api/tables")
     async def list_tables() -> dict:

@@ -1,16 +1,16 @@
 selectividad,filas,estructura,ruta_elegida,lecturas,ms
-0.1%,100,Arbol B+,IndexRangeScan,105,3.608
-0.1%,100,Sequential,SequentialRangeScan,17,1.191
-0.1%,100,Full Scan,SeqScan,2631,285.185
-1.0%,1000,Arbol B+,IndexRangeScan,1010,21.97
-1.0%,1000,Sequential,SequentialRangeScan,48,3.487
-1.0%,1000,Full Scan,SeqScan,2631,280.398
-5.0%,5000,Arbol B+,SeqScan,2631,289.16
-5.0%,5000,Sequential,SequentialRangeScan,192,14.157
-5.0%,5000,Full Scan,SeqScan,2631,286.354
-10.0%,10000,Arbol B+,SeqScan,2631,291.895
-10.0%,10000,Sequential,SequentialRangeScan,371,27.318
-10.0%,10000,Full Scan,SeqScan,2631,284.597
-25.0%,25000,Arbol B+,SeqScan,2631,290.167
-25.0%,25000,Sequential,SequentialRangeScan,906,67.593
-25.0%,25000,Full Scan,SeqScan,2631,299.867
+0.1%,20,Arbol B+,IndexRangeScan,24,0.603
+0.1%,20,Sequential,SequentialRangeScan,11,0.637
+0.1%,20,Full Scan,SeqScan,527,104.841
+1.0%,200,Arbol B+,IndexRangeScan,207,0.471
+1.0%,200,Sequential,SequentialRangeScan,16,0.674
+1.0%,200,Full Scan,SeqScan,527,81.75
+5.0%,1000,Arbol B+,SeqScan,527,72.779
+5.0%,1000,Sequential,SequentialRangeScan,37,2.842
+5.0%,1000,Full Scan,SeqScan,527,89.053
+10.0%,2000,Arbol B+,SeqScan,527,72.97
+10.0%,2000,Sequential,SequentialRangeScan,63,4.939
+10.0%,2000,Full Scan,SeqScan,527,74.029
+25.0%,5000,Arbol B+,SeqScan,527,75.419
+25.0%,5000,Sequential,SequentialRangeScan,142,13.244
+25.0%,5000,Full Scan,SeqScan,527,76.647

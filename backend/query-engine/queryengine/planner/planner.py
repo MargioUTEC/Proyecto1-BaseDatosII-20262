@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..catalog import Catalog, IndexKind, IndexMeta, StorageKind, TableSchema
+from ..types import TypeKind
 from ..errors import PlannerError
 from ..sql import ast
 from ..storage.port import IndexManager
@@ -33,10 +34,13 @@ from .plan import (
     Limit,
     PlanNode,
     Project,
+    RTreeKNNScan,
+    RTreeRadiusScan,
     SeqScan,
     SequentialRangeScan,
     SequentialSearch,
     Sort,
+    TextSearch,
 )
 from .predicates import KeyRange, as_sargable, key_ranges, split_conjuncts
 
@@ -94,11 +98,45 @@ class Planner:
 
     def _plan_select(self, statement: ast.Select) -> PlanNode:
         schema = self._catalog.table(statement.table)
-        projection = bind_projection(statement.projection, schema)
-        where = bind_expression(statement.where, schema)
-
-        node = self._access_path(schema, where)
-        if statement.order_by is not None:
+        projection = bind_projection(_columns_only(statement), schema)
+        if (statement.order_by is not None and statement.order_by.spatial_column is not None
+                and statement.where is not None):
+            raise PlannerError("k-NN espacial no admite un filtro WHERE adicional")
+        if isinstance(statement.where, ast.WithinRadius):
+            column = self._spatial_column(schema, statement.where.column)
+            index = self._spatial_index(schema, column)
+            rows = max(1, round(self._catalog.statistics(schema.name).row_count * 0.1))
+            pages = schema.page_count(self._catalog.statistics(schema.name).row_count)
+            estimate = cost.CostEstimate(
+                float((self._height(index) + rows) if index else pages), rows,
+                "R-Tree MINDIST y lecturas de tabla por RID" if index else "escaneo de tabla y filtro por radio",
+            )
+            node = RTreeRadiusScan(table=schema.name, index=index.name if index else None,
+                                   column=column, point=statement.where.point,
+                                   radius=statement.where.radius, estimate=estimate)
+        elif statement.order_by is not None and statement.order_by.spatial_column is not None:
+            column = self._spatial_column(schema, statement.order_by.spatial_column)
+            if statement.limit is None:
+                raise PlannerError("ORDER BY DISTANCE requiere LIMIT para k-NN")
+            index = self._spatial_index(schema, column)
+            rows = min(statement.limit, self._catalog.statistics(schema.name).row_count)
+            estimate = cost.CostEstimate(
+                float((self._height(index) + rows) if index else
+                      schema.page_count(self._catalog.statistics(schema.name).row_count)),
+                rows, "R-Tree k-NN por MINDIST" if index else "escaneo secuencial para k-NN",
+            )
+            node = RTreeKNNScan(table=schema.name, index=index.name if index else None,
+                                column=column, point=statement.order_by.point, count=statement.limit,
+                                estimate=estimate)
+        else:
+            where = bind_expression(statement.where, schema)
+            textual = self._text_search(schema, statement, where)
+            if textual is not None:
+                return textual
+            if statement.score_alias is not None:
+                raise PlannerError("COSINE_SCORE() requiere un predicado 'columna MATCH ...' en el WHERE")
+            node = self._access_path(schema, where)
+        if statement.order_by is not None and statement.order_by.spatial_column is None:
             column = schema.column(statement.order_by.column).name
             node = Sort(child=node, column=column, descending=statement.order_by.descending)
         if statement.limit is not None:
@@ -106,6 +144,84 @@ class Planner:
         if projection != schema.column_names:
             node = Project(child=node, columns=projection)
         return node
+
+    # -- recuperacion textual ---------------------------------------------
+
+    def _text_search(self, schema: TableSchema, statement: ast.Select,
+                     where: ast.Expression | None) -> PlanNode | None:
+        # El primer MATCH del WHERE define el acceso (índice o Full Text Scan); el resto va en un
+        # Filter (post-filtering). Si se ordena por el puntaje sin filtro, el LIMIT es el K del Top-K.
+        from ..textsearch import check_query
+
+        conjuncts = split_conjuncts(where)
+        match = next((c for c in conjuncts if isinstance(c, ast.Match)), None)
+        if match is None:
+            return None
+        residual = [c for c in conjuncts if c is not match]
+        meta = next((m for m in self._catalog.indexes_on(schema.name, match.column)
+                     if m.kind is IndexKind.INVERTED), None)
+        language = meta.option("language") if meta else None
+        parsed = check_query(match.query, language)
+
+        alias = statement.score_alias
+        order = statement.order_by
+        if order is not None and order.spatial_column is not None:
+            raise PlannerError("no se puede combinar MATCH con ORDER BY DISTANCE")
+        by_score = order is not None and alias is not None and order.column.lower() == alias.lower()
+        top_k = (statement.limit if statement.limit is not None and not residual
+                 and (order is None or by_score) else None)
+
+        statistics = self._catalog.statistics(schema.name)
+        pages = schema.page_count(statistics.row_count)
+        rows = top_k or max(1, statistics.row_count // 100)
+        terms = len(set(parsed.all_terms()))
+        if meta is not None:
+            estimate = cost.CostEstimate(
+                float(2 * terms + 1 + rows), rows,
+                f"{terms} pagina(s) de vocab.dic + listas de posteo + normas en docs.bin "
+                f"+ {rows} lecturas por RID",
+            )
+        else:
+            estimate = cost.CostEstimate(
+                float(pages), rows, f"lee las {pages} paginas y analiza cada texto (sin indice)"
+            )
+        text_node = TextSearch(
+            table=schema.name, index=meta.name if meta else None, column=match.column,
+            query=match.query, parsed=parsed.render(), top_k=top_k,
+            ascending=by_score and not order.descending, language=language,
+            strategy="post-filtering sobre los candidatos" if residual else "",
+            estimate=estimate,
+        )
+        node: PlanNode = text_node
+        if residual:
+            predicate = _rebuild_conjunction(residual)
+            node = Filter(child=node, predicate=predicate, text=_render(predicate),
+                          estimate=estimate)
+        if order is not None and not by_score:
+            column = schema.column(order.column).name
+            node = Sort(child=node, column=column, descending=order.descending)
+        if statement.limit is not None:
+            node = Limit(child=node, count=statement.limit)
+        if statement.projection is None:
+            columns = schema.column_names
+        else:
+            columns = tuple(name if alias is not None and name == alias
+                            else schema.column(name).name for name in statement.projection)
+        if alias is not None or columns != schema.column_names:
+            node = Project(child=node, columns=columns, score_alias=alias, score_source=text_node)
+        return node
+
+    def _spatial_index(self, schema: TableSchema, column: str) -> IndexMeta | None:
+        return next((meta for meta in self._catalog.indexes_on(schema.name)
+                     if meta.kind is IndexKind.RTREE
+                     and meta.column.lower() == column.lower()), None)
+
+    @staticmethod
+    def _spatial_column(schema: TableSchema, name: str) -> str:
+        column = schema.column(name)
+        if column.type.kind not in (TypeKind.CHAR, TypeKind.VARCHAR):
+            raise PlannerError("la columna espacial debe ser CHAR/VARCHAR con formato POINT(lon lat)")
+        return column.name
 
     def _plan_delete(self, statement: ast.Delete) -> PlanNode:
         schema = self._catalog.table(statement.table)
@@ -167,6 +283,8 @@ class Planner:
         rows = cost.expected_rows(key_range, statistics)
         consumed = _conjuncts_for(conjuncts, key_range.column)
         for meta in self._catalog.indexes_on(schema.name, key_range.column):
+            if meta.kind in (IndexKind.RTREE, IndexKind.INVERTED):
+                continue
             height = self._height(meta)
             if key_range.is_equality:
                 estimate = cost.index_equality(height, rows, meta.kind is IndexKind.HASH)
@@ -254,6 +372,13 @@ class Planner:
             return 3
 
 
+def _columns_only(statement: ast.Select) -> tuple[str, ...] | None:
+    # La proyección sin el alias de COSINE_SCORE().
+    if statement.projection is None or statement.score_alias is None:
+        return statement.projection
+    return tuple(name for name in statement.projection if name != statement.score_alias)
+
+
 def _conjuncts_for(conjuncts: list[ast.Expression], column: str) -> list[ast.Expression]:
     """The conjuncts an access path on ``column`` fully enforces."""
     target = column.lower()
@@ -289,6 +414,8 @@ def _render(expression: ast.Expression) -> str:
         )
     if isinstance(expression, ast.IsNull):
         return f"{_render(expression.operand)} IS {'NOT ' if expression.negated else ''}NULL"
+    if isinstance(expression, ast.Match):
+        return f"{expression.column} MATCH {expression.query!r}"
     if isinstance(expression, ast.ColumnRef):
         return expression.name
     if isinstance(expression, ast.Literal):

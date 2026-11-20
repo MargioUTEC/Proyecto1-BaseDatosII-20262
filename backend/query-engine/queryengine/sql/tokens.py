@@ -20,7 +20,7 @@ KEYWORDS = frozenset(
     {
         "AND", "AS", "ASC", "BETWEEN", "BY", "COPY", "CREATE", "DELETE",
         "DELIMITER", "DESC", "DROP", "EXPLAIN", "FALSE", "FROM", "HEADER",
-        "INDEX", "INSERT", "INTO", "IS", "KEY", "LIMIT", "NOT", "NULL", "ON",
+        "INDEX", "INSERT", "INTO", "IS", "KEY", "LIMIT", "MATCH", "NOT", "NULL", "ON",
         "OR", "ORDER", "PRIMARY", "SELECT", "TABLE", "TRUE", "USING", "VALUES",
         "WHERE", "WITH",
     }

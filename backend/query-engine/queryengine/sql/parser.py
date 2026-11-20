@@ -10,6 +10,7 @@ Grammar, informally:
     conjunction := negation ( AND negation )*
     negation    := NOT negation | predicate
     predicate   := '(' disjunction ')'
+                 | ident MATCH string
                  | operand ( comparison operand
                            | [ NOT ] BETWEEN operand AND operand
                            | IS [ NOT ] NULL )
@@ -41,16 +42,19 @@ from .ast import (
     Literal,
     Logical,
     LogicalOp,
+    Match,
     Not,
     OrderBy,
     Select,
     Statement,
+    WithinRadius,
 )
 from .lexer import tokenize
 from .tokens import Token, TokenType
 
 _STORAGE_KINDS = ("HEAP", "SEQUENTIAL")
-_INDEX_KINDS = ("BTREE", "HASH")
+_INDEX_KINDS = ("BTREE", "HASH", "RTREE", "INVERTED")
+_SCORE_FUNCTIONS = ("COSINE_SCORE", "SCORE")
 _COMPARISONS = {op.value: op for op in Comparison}
 _COMPARISONS["!="] = Comparison.NE
 
@@ -59,6 +63,7 @@ class Parser:
     def __init__(self, source: str):
         self._tokens = tokenize(source)
         self._position = 0
+        self._score_alias: str | None = None
 
     def parse(self) -> Statement:
         statement = self._statement()
@@ -162,7 +167,33 @@ class Parser:
         kind = "BTREE"
         if self._match_keyword("USING"):
             kind = self._one_of(_INDEX_KINDS, "tipo de indice")
-        return CreateIndex(name, table, column, kind)
+        options = self._index_options()
+        return CreateIndex(name, table, column, kind, options)
+
+    def _index_options(self) -> tuple[tuple[str, object], ...]:
+        # WITH (scoring = 'TFIDF_COSINE', language = 'spanish', ...)
+        if not self._match_keyword("WITH"):
+            return ()
+        self._expect_punctuation("(")
+        options: dict[str, object] = {}
+        while True:
+            key = self._identifier("nombre de opcion").lower()
+            self._expect_operator("=")
+            token = self._current()
+            if token.type is TokenType.STRING:
+                value: object = token.value
+            elif token.type is TokenType.NUMBER:
+                value = self._number(token.value)
+            elif token.type in (TokenType.IDENTIFIER, TokenType.KEYWORD):
+                value = token.value
+            else:
+                raise self._error(f"valor de opcion invalido: {token}")
+            self._advance()
+            options[key] = value
+            if not self._match_punctuation(","):
+                break
+        self._expect_punctuation(")")
+        return tuple(sorted(options.items()))
 
     def _drop(self) -> Statement:
         self._expect_keyword("DROP")
@@ -240,15 +271,33 @@ class Parser:
         where = self._where_clause()
         order_by = self._order_by_clause()
         limit = self._limit_clause()
-        return Select(table, projection, where, order_by, limit)
+        return Select(table, projection, where, order_by, limit, self._score_alias)
 
     def _projection(self) -> tuple[str, ...] | None:
+        self._score_alias = None
         if self._match_punctuation("*"):
             return None
-        names = [self._identifier("nombre de columna")]
+        names = [self._projection_item()]
         while self._match_punctuation(","):
-            names.append(self._identifier("nombre de columna"))
+            names.append(self._projection_item())
         return tuple(names)
+
+    def _projection_item(self) -> str:
+        # Una columna o COSINE_SCORE() [AS alias].
+        token = self._current()
+        if (token.type is TokenType.IDENTIFIER and token.value.upper() in _SCORE_FUNCTIONS
+                and self._peek(1).is_punctuation("(")):
+            if self._score_alias is not None:
+                raise self._error("COSINE_SCORE() solo puede aparecer una vez")
+            self._advance()
+            self._expect_punctuation("(")
+            self._expect_punctuation(")")
+            alias = "score"
+            if self._match_keyword("AS"):
+                alias = self._identifier("alias de COSINE_SCORE()")
+            self._score_alias = alias
+            return alias
+        return self._identifier("nombre de columna")
 
     def _delete(self) -> Delete:
         self._expect_keyword("DELETE")
@@ -265,6 +314,19 @@ class Parser:
         if not self._match_keyword("ORDER"):
             return None
         self._expect_keyword("BY")
+        if self._current().type is TokenType.IDENTIFIER and self._current().value.upper() == "DISTANCE":
+            self._advance()
+            self._expect_punctuation("(")
+            column = self._identifier("columna espacial")
+            self._expect_punctuation(",")
+            point = self._coordinate_values()
+            self._expect_punctuation(")")
+            descending = False
+            if self._match_keyword("DESC"):
+                descending = True
+            else:
+                self._match_keyword("ASC")
+            return OrderBy(descending=descending, spatial_column=column, point=point)
         column = self._identifier("nombre de columna")
         descending = False
         if self._match_keyword("DESC"):
@@ -298,12 +360,30 @@ class Parser:
         return self._predicate()
 
     def _predicate(self) -> Expression:
+        if (self._current().type is TokenType.IDENTIFIER
+                and self._peek(1).type is TokenType.IDENTIFIER
+                and self._peek(1).value.upper() == "WITHIN_RADIUS"):
+            column = self._advance().value
+            self._advance()
+            self._expect_punctuation("(")
+            point = self._coordinate_values()
+            self._expect_punctuation(",")
+            radius = self._numeric_value()
+            self._expect_punctuation(")")
+            if radius < 0:
+                raise self._error("el radio debe ser no negativo")
+            return WithinRadius(column, point, radius)
         if self._match_punctuation("("):
             inner = self._disjunction()
             self._expect_punctuation(")")
             return inner
 
         left = self._operand()
+
+        if self._match_keyword("MATCH"):
+            if not isinstance(left, ColumnRef):
+                raise self._error("MATCH necesita una columna de texto a la izquierda")
+            return Match(left.name, self._string("consulta de texto"))
 
         if self._match_keyword("IS"):
             negated = bool(self._match_keyword("NOT"))
@@ -326,6 +406,21 @@ class Parser:
             return Compare(left, _COMPARISONS[token.value], self._operand())
 
         raise self._error(f"se esperaba un operador de comparacion y se encontro {token}")
+
+    def _coordinate_values(self) -> tuple[float, float]:
+        self._expect_punctuation("(")
+        first = self._numeric_value()
+        self._expect_punctuation(",")
+        second = self._numeric_value()
+        self._expect_punctuation(")")
+        return float(first), float(second)
+
+    def _numeric_value(self) -> float:
+        token = self._current()
+        if token.type is not TokenType.NUMBER:
+            raise self._error(f"se esperaba una coordenada numerica y se encontro {token}")
+        self._advance()
+        return self._number(token.value)
 
     def _operand(self) -> Expression:
         token = self._current()

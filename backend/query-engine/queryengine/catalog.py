@@ -33,6 +33,8 @@ class StorageKind(Enum):
 class IndexKind(Enum):
     BTREE = "BTREE"
     HASH = "HASH"
+    RTREE = "RTREE"
+    INVERTED = "INVERTED"
 
     @property
     def supports_range(self) -> bool:
@@ -71,18 +73,27 @@ class IndexMeta:
     table: str
     column: str
     kind: IndexKind
+    options: tuple[tuple[str, object], ...] = ()
+    # Opciones de CREATE INDEX ... WITH (clave = valor), en minúsculas.
+
+    def option(self, name: str, default=None):
+        return dict(self.options).get(name.lower(), default)
 
     def to_dict(self) -> dict:
-        return {
+        raw = {
             "name": self.name,
             "table": self.table,
             "column": self.column,
             "kind": self.kind.value,
         }
+        if self.options:
+            raw["options"] = dict(self.options)
+        return raw
 
     @staticmethod
     def from_dict(raw: dict) -> IndexMeta:
-        return IndexMeta(raw["name"], raw["table"], raw["column"], IndexKind(raw["kind"]))
+        return IndexMeta(raw["name"], raw["table"], raw["column"], IndexKind(raw["kind"]),
+                         tuple(sorted(raw.get("options", {}).items())))
 
 
 @dataclass

@@ -28,6 +28,7 @@
 
   --riel: 232px;
   --tele: 300px;
+  --mapa: 330px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -115,11 +116,11 @@ body {
 /* ---------- rejilla principal ---------- */
 .espacio {
   display: grid;
-  grid-template-columns: var(--riel) minmax(0, 1fr) var(--tele);
+  grid-template-columns: var(--riel) minmax(0, 1fr) var(--mapa) var(--tele);
   grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas:
-    "riel editor  tele"
-    "riel salida  tele";
+    "riel editor mapa tele"
+    "riel salida mapa tele";
   gap: 1px;
   background: var(--linea);
   min-height: 0;
@@ -128,6 +129,7 @@ body {
 .editor      { grid-area: editor; }
 .telemetria  { grid-area: tele; }
 .resultados  { grid-area: salida; }
+.espacial    { grid-area: mapa; }
 
 .panel {
   background: var(--lienzo);
@@ -150,6 +152,37 @@ body {
 .panel-cuerpo.sin-pad { padding: 0; }
 .vacio-nota { color: var(--tinta-3); font-size: 12px; margin: 0; }
 .vacio-nota.con-pad { padding: 14px 12px; }
+
+/* ---------- mapa espacial ---------- */
+.espacial-cuerpo { display: flex; flex-direction: column; gap: 9px; }
+.espacial-controles, .espacial-parametros, .espacial-acciones {
+  display: flex; align-items: end; flex-wrap: wrap; gap: 7px;
+}
+.espacial-controles label, .espacial-parametros label {
+  display: flex; flex-direction: column; gap: 3px;
+  color: var(--tinta-3); font-family: var(--mono); font-size: 9px;
+  letter-spacing: .04em; min-width: 76px; flex: 1;
+}
+.espacial-controles select { max-width: none; width: 100%; }
+.espacial-parametros input {
+  min-width: 0; width: 100%; padding: 5px 6px;
+  color: var(--tinta); background: var(--lienzo-2);
+  border: 1px solid var(--linea); border-radius: 3px;
+  font: 11px var(--mono);
+}
+.espacial-parametros[hidden] { display: none; }
+.espacial-acciones { justify-content: space-between; align-items: center; }
+.check-mbr { display: inline-flex; align-items: center; gap: 5px; color: var(--tinta-2); font-size: 11px; }
+.btn-secundario { background: var(--lienzo-2); color: var(--tinta); border-color: var(--linea); }
+#mapa { min-height: 230px; flex: 1; border: 1px solid var(--linea); border-radius: 3px; z-index: 0; }
+.metricas-espaciales {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 10px;
+  margin: 0; padding: 8px; background: var(--lienzo-2); border-radius: 3px;
+}
+.metricas-espaciales div { min-width: 0; }
+.metricas-espaciales dt { color: var(--tinta-3); font: 9px var(--mono); text-transform: uppercase; }
+.metricas-espaciales dd { margin: 1px 0 0; color: var(--tinta); font: 11px var(--mono); font-variant-numeric: tabular-nums; }
+.aviso-espacial { margin: 0; color: var(--alarma); font-size: 11px; }
 
 /* ---------- controles ---------- */
 button, select, textarea { font-family: inherit; }
@@ -366,8 +399,9 @@ th.num-fila { z-index: 2; background: var(--lienzo-2); }
     grid-template-areas:
       "riel editor"
       "riel salida"
+      "espacial espacial"
       "tele tele";
-    grid-template-rows: auto minmax(220px, 1fr) auto;
+    grid-template-rows: minmax(170px, .8fr) minmax(180px, .7fr) minmax(300px, 1fr) auto;
   }
   .telemetria .panel-cuerpo { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; align-items: start; }
   .plan-bloque { grid-column: 1 / -1; }
@@ -376,10 +410,12 @@ th.num-fila { z-index: 2; background: var(--lienzo-2); }
   body { height: auto; }
   .espacio {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "editor" "salida" "tele" "riel";
+    grid-template-areas: "editor" "salida" "espacial" "tele" "riel";
     grid-template-rows: auto;
   }
   .panel { max-height: 62vh; }
+  .espacial { min-height: 560px; max-height: none !important; }
+  #mapa { min-height: 300px; }
   .telemetria .panel-cuerpo { grid-template-columns: 1fr; }
   .marca-sub { display: none; }
 }
